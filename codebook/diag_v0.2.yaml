@@ -1,0 +1,28 @@
+# GlyphAI fleet-RCA codebook, active diagnostics domain, v0.2
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# Road 5: results of active GPU diagnostics -> concept glyphs.
+# Silent data corruption (SDC) leaves no Xid and no ECC flag: it only shows when the math is checked.
+#
+# Run diagnostics as a pre-flight check on a drained node, never next to user work: the stress tests
+# take the whole GPU. Plugin names and run levels follow NVIDIA "DCGM Diagnostics":
+#   r2: software, pcie, memory, memory_bandwidth
+#   r3: r2 + diagnostic, targeted_stress, targeted_power, nvbandwidth, nccl_tests   (GEMM math stress)
+#   r4: r3 + memtest, pulse
+#
+# Input: <fleet>/<host>/diag.csv with columns  timestamp,gpu,test,result
+#   result: pass | fail | warn | skip (from `dcgmi diag -r 3 -j`, NVIDIA field diagnostics, or a wrapper)
+
+version: "0.2.0"
+
+concepts:
+  GPU.SDC:        {severity: crit, cause: hardware, triage: rma,
+                   desc: "Math failure under GEMM stress (diagnostic, targeted stress or targeted power): silent data corruption",
+                   note: "A GPU that passes nvidia-smi but fails matrix math has an ALU or Tensor Core defect; a driver reload or reboot will not fix it. It can poison checkpoints silently: keep it out of the cluster"}
+  GPU.DIAG.FAIL:  {severity: crit, cause: hardware, triage: drain_and_cordon,
+                   desc: "Other diagnostic failure (memory, memory bandwidth, PCIe/NVLink, bandwidth, NCCL, pulse)",
+                   note: "Keep the node drained; repeat the failed test once; a repeated failure goes to RMA"}
+
+diag:
+  math_tests: [diagnostic, targeted_stress, targeted_power]
+  other_tests: [software, pcie, memory, memory_bandwidth, nvbandwidth, nccl_tests, memtest, pulse]

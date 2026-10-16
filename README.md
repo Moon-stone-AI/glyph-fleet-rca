@@ -22,6 +22,7 @@ Three roads lead to the same glyph:
 - **text SEL logs** in any dialect go through the lexicon (L1) and phrase rules (L2);
 - **Linux kernel logs** (v0.2: `dmesg -T` or `journalctl -o short-iso`) go through kernel rules: NVIDIA Xid and SXid, MCE, EDAC, PCIe AER, pciehp, IOMMU/DMAR faults, GPU init failures, Fabric Manager failures, kernel panic, lockups, OOM, thermal throttling, NIC link loss. Xid meanings follow NVIDIA's Xid catalog. Routine kernel chatter is ignored and counted.
 - **GPU telemetry** (v0.2: DCGM samples in `dcgm.csv`) goes through metric rules: NVLink CRC rate, PCIe replay rate, row-remap failure and pending, spare-row banks, power and thermal violation time. Each metric is understood under both its dcgm-exporter name and its DCGM field name. This is the early-warning road: it fires before any Xid is written.
+- **Active diagnostics** (v0.2: results in `diag.csv`, from `dcgmi diag -r 3` or NVIDIA field diagnostics, run on a drained node): a failed matrix-math test (`diagnostic`, `targeted_stress`, `targeted_power`) is silent data corruption, `GPU.SDC`, and goes to RMA; other failed tests keep the node drained.
 
 Words the codebook does not know are not guessed: they surface as data gaps (`?word`) so the codebook can be extended.
 
@@ -115,7 +116,7 @@ python -m glyphrca synth fleet_demo --bad 500 --ok 200      # writes a synthetic
 python -m glyphrca analyze fleet_demo                        # the report
 python -m glyphrca analyze fleet_demo --json report.json \
        --tier2-key "your-secret" --public public.json --private private_codebook.json
-python -m unittest discover -s tests -v                      # 30 tests
+python -m unittest discover -s tests -v                      # 31 tests
 ```
 
 ### Input layout
@@ -123,6 +124,7 @@ python -m unittest discover -s tests -v                      # 30 tests
 <fleet>/<host>/sel.log     raw SEL: binary hex records and/or text, any dialect, mixed is fine
 <fleet>/<host>/kernel.log  optional: Linux kernel log, dmesg -T or journalctl -o short-iso
 <fleet>/<host>/dcgm.csv    optional: GPU telemetry, columns timestamp,gpu,field,value
+<fleet>/<host>/diag.csv    optional: active diagnostics results, columns timestamp,gpu,test,result
 <fleet>/<host>/pcie.txt    optional: <BDF> <parent BDF|-> <kind> <slot> x<w>/x<max> gen<g>/gen<max>
 <fleet>/inventory.csv      optional: host,fw,bios,...
 ```
@@ -133,6 +135,7 @@ python -m unittest discover -s tests -v                      # 30 tests
 codebook/sel_v0.1.yaml   SEL codebook: concepts, binary SEL decoding, lexicon, phrase rules
 codebook/kernel_v0.2.yaml kernel codebook: GPU/NVLink/host concepts, Xid table, kernel rules, escalation
 codebook/telemetry_v0.2.yaml telemetry codebook: DCGM metrics (exporter and field names), thresholds
+codebook/diag_v0.2.yaml   active diagnostics codebook: DCGM diagnostic plugins, SDC vs other failures
 glyphrca/encode.py       L1, L2 (binary, text and kernel roads, template cache)
 glyphrca/fleet.py        L3 runs, L4 signatures, survivors, inventory join, simultaneity,
                          software-wide failures, lemon nodes
@@ -156,7 +159,7 @@ tests/                   unit and end-to-end tests
 
 - ~~v0.2 Linux kernel and NVIDIA Xid~~ (done)
 - v0.3 vendor codebooks: Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, full Intel tables, AMD
-- agent (beyond log analysis): job-aware blast radius (requeue the whole multi-node job through Slurm, Volcano or Ray, not just drain one node); NVLink state polling for degraded links; health-query watchdog for baseboard management hangs; ghost GPU contexts after container crashes; ingest of active diagnostics (DCGM diagnostics, NVIDIA field diagnostics) for silent data corruption
+- agent (beyond log analysis): job-aware blast radius (requeue the whole multi-node job through Slurm, Volcano or Ray, not just drain one node); NVLink state polling for degraded links; health-query watchdog for baseboard management hangs; ghost GPU contexts after container crashes; scheduling pre-flight diagnostics on drained nodes
 - v0.4 Windows Event Log in several languages: one glyph whatever the language
 - later: rate-based states (a burst vs. a slow leak), interactive fleet view
 

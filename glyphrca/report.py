@@ -4,6 +4,7 @@ Fleet directory layout:
     <fleet>/<host>/sel.log     raw SEL (binary hex records and/or text in any dialect)
     <fleet>/<host>/kernel.log  optional Linux kernel log (dmesg -T or journalctl -o short-iso)
     <fleet>/<host>/dcgm.csv    optional GPU telemetry: timestamp,gpu,field,value
+    <fleet>/<host>/diag.csv    optional active diagnostics results: timestamp,gpu,test,result
     <fleet>/<host>/pcie.txt    optional PCIe tree
     <fleet>/inventory.csv      optional: host,fw,bios,...
 
@@ -45,7 +46,7 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
     kernel_ignored = 0
     for d in sorted(p for p in fleet_dir.iterdir() if p.is_dir()):
         ev = []
-        for name, source in (("sel.log", "sel"), ("kernel.log", "kernel"), ("dcgm.csv", "telemetry")):
+        for name, source in (("sel.log", "sel"), ("kernel.log", "kernel"), ("dcgm.csv", "telemetry"), ("diag.csv", "diag")):
             f = d / name
             if not f.exists():
                 continue
@@ -100,6 +101,12 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
         for e in ev:
             if e.source == "telemetry":
                 telemetry.setdefault(e.concept, {}).setdefault(h, set()).add(_bdf_of(e))
+    diag = {}
+    for h, ev in events.items():
+        for e in ev:
+            if e.source == "diag":
+                test = next((a[5:] for a in e.args if a.startswith("test=")), "?")
+                diag.setdefault(h, []).append({"bdf": _bdf_of(e), "test": test, "concept": e.concept})
     fabric = sorted(h for h, ev in events.items() if any(e.concept == "FABRIC.MANAGER.DOWN" for e in ev))
     gpu_unknown = Counter(a for ev in events.values() for e in ev if e.concept == "GPU.XID.OTHER"
                           for a in e.args if a.startswith("xid="))
@@ -140,6 +147,7 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
         "telemetry": {c: {h: sorted(b) for h, b in hs.items()} for c, hs in telemetry.items()},
         "fabric_manager_down": fabric,
         "aer_storms": storms,
+        "diagnostics": diag,
         "iommu_faults": iommu,
         "gpu_init_failures": init_fail,
         "triage": {c: {"triage": cb.triage(c), "note": cb.concepts.get(c, {}).get("note", "")}
@@ -221,6 +229,13 @@ def render_text(r: dict) -> str:
     if r.get("fabric_manager_down"):
         out.append(f"\nFabric Manager down on {len(r['fabric_manager_down'])} servers -> multi-node jobs will hang "
                    f"at the first collective: drain now: {', '.join(r['fabric_manager_down'])}")
+    if r.get("diagnostics"):
+        out.append("\nActive diagnostics failures:")
+        for h, fails in sorted(r["diagnostics"].items()):
+            for f in fails:
+                verdict = ("silent data corruption -> RMA, keep out of the cluster" if f["concept"] == "GPU.SDC"
+                           else "keep drained, repeat once, RMA if it fails again")
+                out.append(f"  {h} {f['bdf']}: {f['test']} failed -> {verdict}")
     if r.get("aer_storms"):
         out.append("\nAER storms (the host may lock up writing logs -> isolate now, rate-limit AER logging):")
         for h, n in sorted(r["aer_storms"].items()):

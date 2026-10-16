@@ -138,6 +138,15 @@ class FleetV02(unittest.TestCase):
         self.assertEqual(sorted(self.r["aer_storms"]), self.truth["aer_storm"])
         self.assertEqual(self.r["gpu_init_failures"], self.truth["init_fail"])
 
+    def test_active_diagnostics_math_failure_is_sdc(self):
+        d = self.r["diagnostics"]
+        self.assertEqual(sorted(d), sorted(self.truth["sdc"] + self.truth["diag_fail"]))
+        for h in self.truth["sdc"]:
+            self.assertEqual([(f["test"], f["concept"]) for f in d[h]], [("diagnostic", "GPU.SDC")])
+        for h in self.truth["diag_fail"]:
+            self.assertEqual([(f["test"], f["concept"]) for f in d[h]], [("memory", "GPU.DIAG.FAIL")])
+        self.assertEqual(Codebook.load().triage("GPU.SDC"), "rma")
+
     def test_gsp_is_driver_or_hardware_not_user_app(self):
         cb = Codebook.load()
         self.assertEqual(cb.cause("GPU.CTRL.GSP"), "driver_or_hw")

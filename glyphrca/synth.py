@@ -215,6 +215,7 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
     crc_hosts, replay_hosts, spare_hosts, power_hosts = take(3), take(2), take(2), take(2)
     control_hosts = take(10)
     iommu_hosts, storm_hosts, init_hosts = take(1), take(1), take(1)
+    sdc_hosts, diagfail_hosts, diagpass_hosts = take(1), take(1), take(3)
     app_hosts = rest[:app_bug]
     truth = {"survivor": survivor, "bad_fw": "3.2.1", "switch_fault": sw_hosts, "gpu_fault": gpu_hosts,
              "missing_gpu": miss_hosts, "degraded": deg_hosts, "bad_switch": "RP1/SW1",
@@ -226,6 +227,7 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
              "orphan_xid45": orphan_hosts if kernel else [], "gsp_repeat": gsp_hosts if kernel else [],
              "iommu": iommu_hosts if kernel else [], "aer_storm": storm_hosts if kernel else [],
              "init_fail": init_hosts if kernel else [],
+             "sdc": sdc_hosts if kernel else [], "diag_fail": diagfail_hosts if kernel else [],
              "telemetry": {"LINK.NVLINK.CRC_RATE": crc_hosts, "PCIE.REPLAY_RATE": replay_hosts,
                            "GPU.MEM.REMAP.LOW_SPARE": spare_hosts, "POWER.THROTTLE": power_hosts} if telemetry else {}}
     krng = random.Random(seed + 2)  # kernel content has its own stream, so SEL stays as in v0.1
@@ -292,6 +294,17 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
         if h in zombie_hosts:  # uncontained ECC, then a task stuck in state D
             k.xid(t0 + 3000, where["GPU7"], 95, "Uncontained: FBHUB. RST: Yes, D-RST: No")
             k.line(t0 + 3200, "INFO: task python3:4242 blocked for more than 120 seconds.")
+        if kernel and h in sdc_hosts + diagfail_hosts + diagpass_hosts:  # pre-flight dcgmi diag -r 3
+            ts_d = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 + 1000))
+            rows = ["timestamp,gpu,test,result"]
+            for slot in ("GPU0", "GPU1", "GPU2", "GPU3", "GPU4", "GPU5", "GPU6", "GPU7"):
+                for test in ("software", "pcie", "memory", "memory_bandwidth", "diagnostic", "targeted_stress",
+                             "targeted_power", "nvbandwidth", "nccl_tests"):
+                    bad = (h in sdc_hosts and slot == "GPU3" and test == "diagnostic") or \
+                          (h in diagfail_hosts and slot == "GPU5" and test == "memory")
+                    rows.append(f"{ts_d},{where[slot]},{test},{'fail' if bad else 'pass'}")
+            (out / h).mkdir(exist_ok=True)
+            (out / h / "diag.csv").write_text("\n".join(rows) + "\n")
         if h in iommu_hosts:
             k.line(t0 + 7000, "DMAR: DRHD: handling fault status reg 2")
             k.line(t0 + 7000, "DMAR: [DMA Write NO_PASID] Request device [9a:00.0] fault addr 0x7f2a1000 [fault reason 0x05] PTE Write access is not set")
