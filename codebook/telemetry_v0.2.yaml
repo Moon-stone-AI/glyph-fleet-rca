@@ -23,6 +23,8 @@ concepts:
                             desc: "Memory banks with low or no spare rows left for remapping",
                             note: "DCGM reports spare rows as a per-bank histogram (max, high, partial, low, none), not a percentage; any bank in low or none is the trigger. Plan maintenance before Xid 64."}
 
+  GPU.MEM.REMAP.NO_SPARE:  {severity: crit, cause: hardware, triage: plan_rma,
+                            desc: "Memory banks with no spare rows left: the next bad row cannot be remapped"}
   POWER.THROTTLE:          {severity: warn, cause: platform, triage: check_power_infrastructure,
                             desc: "GPU held back by power limits for a large share of time",
                             note: "Persistent power braking under normal load points to PDUs, PSUs or board power rails: flag for infrastructure maintenance"}
@@ -39,7 +41,9 @@ metrics:
   - {glyph: GPU.MEM.REMAP.EVENT, kind: gauge, value_above: 0,
      names: [DCGM_FI_DEV_ROW_REMAP_PENDING]}
   - {glyph: GPU.MEM.REMAP.LOW_SPARE, kind: gauge, value_above: 0,
-     names: [DCGM_FI_DEV_BANK_REMAP_AVAIL_LOW, DCGM_FI_DEV_BANK_REMAP_AVAIL_NONE]}
+     names: [DCGM_FI_DEV_BANK_REMAP_AVAIL_LOW]}
+  - {glyph: GPU.MEM.REMAP.NO_SPARE, kind: gauge, value_above: 0,
+     names: [DCGM_FI_DEV_BANK_REMAP_AVAIL_NONE]}
   # violation counters are in nanoseconds; 1.8e10 ns per minute = throttled 30 % of the time
   - {glyph: POWER.THROTTLE, kind: counter, rate_per_min_above: 1.8e10,
      names: [DCGM_FI_DEV_POWER_VIOLATION]}

@@ -96,6 +96,25 @@ Data gaps (Xid codes not in the codebook): {'xid=154': 2}
 - **Unknown Xid codes are reported, not guessed.**
 - **Stable signatures.** A signature is the order in which concepts first appear, so two sources interleaving line by line still tell one story: the survivor is still found.
 
+### v0.2.1 (branch `gpu-health`): a health index for every GPU
+
+With `gpus.csv` (host, bdf, uuid, model, hours) each GPU gets a card with a health index from 0 to 100 %, built from its own history across all sources:
+
+```
+GPU health index (0-100 %, from each GPU's own history; not a survival probability):
+  H100       2520 GPUs   mean  98.0 %   median  98.1 %   excellent 2506, good 13, do not sell 1
+  Lowest:
+       10 %  do not sell A100   node-00329 0000:45:00.0  age -1.9  [RMA, not for sale: failed matrix-math diagnostic]
+     84.3 %  good        H100   node-00332 0000:25:00.0  memory -15 · age -0.7
+```
+
+- Six components with ceilings: GPU memory 35, severe Xid 25, links 15, throttling 10, diagnostics 10, age 5.
+- Hard caps: exhausted row remapping or a failed matrix-math test caps the GPU at 10 %; banks with no spare rows at 30 %.
+- Every score shows its deductions; weights live in `codebook/health_v0.2.1.yaml`.
+- The index describes the past. It is not a probability of survival: that would need real failure data.
+- PCIe floods during a common-mode crash are not charged to the GPUs.
+- `--health-csv cards.csv` writes one row per GPU, for a fleet sale or a refresh decision.
+
 ### PCIe tree as a map
 Bus numbers differ between servers; slot paths (`RP1/SW1/GPU5`) do not. The most common tree shape is the golden tree. Errors carrying a BDF are mapped onto it:
 - errors on two or more devices behind the same switch, on several servers → **suspect the switch or riser**, not the GPUs;
@@ -116,7 +135,7 @@ python -m glyphrca synth fleet_demo --bad 500 --ok 200      # writes a synthetic
 python -m glyphrca analyze fleet_demo                        # the report
 python -m glyphrca analyze fleet_demo --json report.json \
        --tier2-key "your-secret" --public public.json --private private_codebook.json
-python -m unittest discover -s tests -v                      # 31 tests
+python -m unittest discover -s tests -v                      # 38 tests
 ```
 
 ### Input layout
@@ -127,6 +146,7 @@ python -m unittest discover -s tests -v                      # 31 tests
 <fleet>/<host>/diag.csv    optional: active diagnostics results, columns timestamp,gpu,test,result
 <fleet>/<host>/pcie.txt    optional: <BDF> <parent BDF|-> <kind> <slot> x<w>/x<max> gen<g>/gen<max>
 <fleet>/inventory.csv      optional: host,fw,bios,...
+<fleet>/gpus.csv           optional: host,bdf,uuid,model,hours (GPU identity for the health index)
 ```
 
 ## Repository

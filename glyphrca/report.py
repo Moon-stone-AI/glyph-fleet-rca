@@ -7,6 +7,7 @@ Fleet directory layout:
     <fleet>/<host>/diag.csv    optional active diagnostics results: timestamp,gpu,test,result
     <fleet>/<host>/pcie.txt    optional PCIe tree
     <fleet>/inventory.csv      optional: host,fw,bios,...
+    <fleet>/gpus.csv           optional: host,bdf,uuid,model,hours (GPU identity for the health index)
 
 (c) 2026 Vitali de Mille. PolyForm Noncommercial 1.0.0.
 """
@@ -17,7 +18,7 @@ import zlib
 from collections import Counter
 from pathlib import Path
 
-from . import pcie
+from . import health, pcie
 from .encode import Codebook, Encoder
 from .fleet import (build_fleet, crashed, escalations, inventory_join, lemon_nodes, load_inventory,
                     orphan_cleanups, simultaneity, software_wide, zombie_gpus, aer_storms)
@@ -107,6 +108,8 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
             if e.source == "diag":
                 test = next((a[5:] for a in e.args if a.startswith("test=")), "?")
                 diag.setdefault(h, []).append({"bdf": _bdf_of(e), "test": test, "concept": e.concept})
+    gpus = health.load_gpus(fleet_dir / "gpus.csv") if (fleet_dir / "gpus.csv").exists() else None
+    cards = health.gpu_health(events, trees, gpus, common_mode) if (gpus or trees) else []
     fabric = sorted(h for h, ev in events.items() if any(e.concept == "FABRIC.MANAGER.DOWN" for e in ev))
     gpu_unknown = Counter(a for ev in events.values() for e in ev if e.concept == "GPU.XID.OTHER"
                           for a in e.args if a.startswith("xid="))
@@ -150,6 +153,8 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
         "diagnostics": diag,
         "iommu_faults": iommu,
         "gpu_init_failures": init_fail,
+        "gpu_health": cards,
+        "gpu_health_by_model": health.fleet_stats(cards) if cards else {},
         "triage": {c: {"triage": cb.triage(c), "note": cb.concepts.get(c, {}).get("note", "")}
                    for c in sorted({e.concept for ev in events.values() for e in ev}) if c in cb.concepts},
     }
@@ -244,6 +249,17 @@ def render_text(r: dict) -> str:
         out.append(f"\nIOMMU / DMA remapping faults (GPUDirect traffic stalls, no Xid) -> reboot: {', '.join(r['iommu_faults'])}")
     if r.get("gpu_init_failures"):
         out.append(f"\nGPU driver failed to initialise -> check retirement records, then re-initialise: {', '.join(r['gpu_init_failures'])}")
+    if r.get("gpu_health_by_model"):
+        out.append("\nGPU health index (0-100 %, from each GPU's own history; not a survival probability):")
+        for model, st in r["gpu_health_by_model"].items():
+            bands = ", ".join(f"{k} {v}" for k, v in st["bands"].items())
+            out.append(f"  {model:<8} {st['gpus']:>6} GPUs   mean {st['mean']:>5} %   median {st['median']:>5} %   {bands}")
+        worst = sorted(r["gpu_health"], key=lambda c: c["score"])[:8]
+        out.append("  Lowest:")
+        for c in worst:
+            parts = " · ".join(f"{k} -{v:g}" for k, v in c["breakdown"].items())
+            out.append(f"    {c['score']:>5} %  {c['band']:<11} {c['model']:<6} {c['host']} {c['bdf']}  {parts}"
+                       + (f"  [{'; '.join(c['verdicts'])}]" if c["verdicts"] else ""))
     if r.get("escalations"):
         out.append("\nEscalations (a light triage repeated too often on one GPU):")
         for e in r["escalations"]:

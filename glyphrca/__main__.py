@@ -27,6 +27,7 @@ def main(argv=None):
     a = sub.add_parser("analyze", help="analyse a fleet directory")
     a.add_argument("fleet")
     a.add_argument("--json")
+    a.add_argument("--health-csv", help="write one row per GPU with its health index")
     a.add_argument("--tier2-key")
     a.add_argument("--public", default="public_report.json")
     a.add_argument("--private", default="private_codebook.json")
@@ -38,6 +39,10 @@ def main(argv=None):
         return 0
     r = analyse_fleet(args.fleet)
     print(render_text(r))
+    if args.health_csv and r.get("gpu_health"):
+        from .health import write_csv
+        write_csv(r["gpu_health"], args.health_csv)
+        print(f"\nGPU health cards -> {args.health_csv}")
     if args.json:
         json.dump(r, open(args.json, "w"), indent=1)
     if args.tier2_key:

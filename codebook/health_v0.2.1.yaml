@@ -1,0 +1,60 @@
+# GlyphAI fleet-RCA: GPU health index, v0.2.1
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# A health index from 0 to 100 % per GPU, built from the GPU's own history in the logs.
+# It describes the past. It is NOT a probability that the GPU will survive a given time:
+# that would need real failure data, which this index does not have.
+#
+# Score = 100 - sum of component penalties (each component has a ceiling), then hard caps.
+# Starting weights proposed by Verter, approved in principle by Vitali de Mille on 16 Oct 2026;
+# to be tuned from practice.
+
+version: "0.2.1"
+
+components:
+  memory:      {max: 35, label: "GPU memory (ECC, row remapping, spare rows)"}
+  severe_xid:  {max: 25, label: "Severe GPU errors (bus loss, uncontained ECC, GSP, micro-controller halt, init failure)"}
+  links:       {max: 15, label: "NVLink and PCIe (errors, replays, degraded link)"}
+  throttling:  {max: 10, label: "Power and thermal throttling"}
+  diagnostics: {max: 10, label: "Active diagnostics"}
+  age:         {max: 5,  label: "Age and hours in service"}
+
+# concept -> component, points, how to count
+#   each: points per event; once: points if the concept appears at all; per_run: points per run of the concept
+#   max: ceiling for this rule inside its component
+penalties:
+  GPU.MEM.ECC.CONTAINED:   {component: memory,      points: 3,  count: each,    max: 15}
+  GPU.MEM.ECC.DBE:         {component: memory,      points: 8,  count: each,    max: 24}
+  GPU.MEM.ECC.SBE_RATE:    {component: memory,      points: 5,  count: once}
+  GPU.MEM.REMAP.EVENT:     {component: memory,      points: 4,  count: each,    max: 16}
+  GPU.MEM.REMAP.LOW_SPARE: {component: memory,      points: 15, count: once}
+  GPU.BUS.LOST:            {component: severe_xid,  points: 8,  count: each,    max: 24}
+  GPU.MEM.ECC.UNCONTAINED: {component: severe_xid,  points: 8,  count: each,    max: 24}
+  GPU.CTRL.GSP:            {component: severe_xid,  points: 8,  count: each,    max: 24}
+  GPU.UCODE.HALT:          {component: severe_xid,  points: 8,  count: each,    max: 24}
+  GPU.INIT.FAIL:           {component: severe_xid,  points: 8,  count: each,    max: 24}
+  LINK.NVLINK.ERROR:       {component: links,       points: 3,  count: each,    max: 9}
+  LINK.NVLINK.CRC_RATE:    {component: links,       points: 5,  count: once}
+  PCIE.REPLAY_RATE:        {component: links,       points: 5,  count: once}
+  PCIE.CORR:               {component: links,       points: 2,  count: per_run, max: 6}
+  PCIE.UNCORR.NONFATAL:    {component: links,       points: 4,  count: each,    max: 8}
+  PCIE.FATAL:              {component: links,       points: 8,  count: each,    max: 8}
+  LINK.DEGRADED:           {component: links,       points: 10, count: once}     # from the PCIe tree
+  POWER.THROTTLE:          {component: throttling,  points: 5,  count: once}
+  GPU.THERMAL.THROTTLE:    {component: throttling,  points: 5,  count: once}
+  GPU.DIAG.FAIL:           {component: diagnostics, points: 10, count: once}
+
+age:
+  points_per_year: 1          # by hours in service, 8,760 h = one year
+
+# hard caps: if the concept is present, the score cannot be higher than this
+caps:
+  GPU.MEM.REMAP.FAIL:      {max_score: 10, verdict: "RMA, not for sale: spare rows exhausted"}
+  GPU.SDC:                 {max_score: 10, verdict: "RMA, not for sale: failed matrix-math diagnostic"}
+  GPU.MEM.REMAP.NO_SPARE:  {max_score: 30, verdict: "memory banks with no spare rows left"}
+
+bands:
+  - {min: 90, label: excellent}
+  - {min: 75, label: good}
+  - {min: 50, label: caution}
+  - {min: 0,  label: do not sell}

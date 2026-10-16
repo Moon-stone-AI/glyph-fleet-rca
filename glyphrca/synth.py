@@ -216,6 +216,7 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
     control_hosts = take(10)
     iommu_hosts, storm_hosts, init_hosts = take(1), take(1), take(1)
     sdc_hosts, diagfail_hosts, diagpass_hosts = take(1), take(1), take(3)
+    remapfail_hosts, nospare_hosts = take(1), take(1)
     app_hosts = rest[:app_bug]
     truth = {"survivor": survivor, "bad_fw": "3.2.1", "switch_fault": sw_hosts, "gpu_fault": gpu_hosts,
              "missing_gpu": miss_hosts, "degraded": deg_hosts, "bad_switch": "RP1/SW1",
@@ -228,12 +229,13 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
              "iommu": iommu_hosts if kernel else [], "aer_storm": storm_hosts if kernel else [],
              "init_fail": init_hosts if kernel else [],
              "sdc": sdc_hosts if kernel else [], "diag_fail": diagfail_hosts if kernel else [],
+             "remap_fail": remapfail_hosts if kernel else [], "no_spare": nospare_hosts if telemetry else [],
              "telemetry": {"LINK.NVLINK.CRC_RATE": crc_hosts, "PCIE.REPLAY_RATE": replay_hosts,
                            "GPU.MEM.REMAP.LOW_SPARE": spare_hosts, "POWER.THROTTLE": power_hosts} if telemetry else {}}
     krng = random.Random(seed + 2)  # kernel content has its own stream, so SEL stays as in v0.1
     t_app = CRASH_T - 3 * 3600
 
-    inv_rows = []
+    inv_rows, gpu_rows = [], []
     for i, h in enumerate(hosts):
         broken = i < bad
         w = Writer(rng.choice(["ipmitool", "vendorD", "vendorH", "hex"]), rng)
@@ -305,6 +307,14 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
                     rows.append(f"{ts_d},{where[slot]},{test},{'fail' if bad else 'pass'}")
             (out / h).mkdir(exist_ok=True)
             (out / h / "diag.csv").write_text("\n".join(rows) + "\n")
+        if h in remapfail_hosts:
+            k.xid(t0 + 9000, where["GPU2"], 63, "Row remapping event.")
+            k.xid(t0 + 9100, where["GPU2"], 64, "Row remapper recording failure.")
+        if telemetry and h in nospare_hosts:
+            ts_n = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 + 7300))
+            (out / h).mkdir(exist_ok=True)
+            (out / h / "dcgm.csv").write_text("timestamp,gpu,field,value\n"
+                                              f"{ts_n},{where['GPU7']},DCGM_FI_DEV_BANK_REMAP_AVAIL_NONE,2\n")
         if h in iommu_hosts:
             k.line(t0 + 7000, "DMAR: DRHD: handling fault status reg 2")
             k.line(t0 + 7000, "DMAR: [DMA Write NO_PASID] Request device [9a:00.0] fault addr 0x7f2a1000 [fault reason 0x05] PTE Write access is not set")
@@ -351,8 +361,16 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
         (d / "pcie.txt").write_text("\n".join(tree) + "\n")
         if kernel:
             (d / "kernel.log").write_text(k.text())
+        for slot in ("GPU0", "GPU1", "GPU2", "GPU3", "GPU4", "GPU5", "GPU6", "GPU7"):
+            gpu_rows.append({"host": h, "bdf": where[slot], "uuid": f"GPU-{krng.getrandbits(64):016x}",
+                             "model": "H100" if i % 10 < 7 else ("H200" if i % 10 < 9 else "A100"),
+                             "hours": krng.randint(2000, 30000)})
         inv_rows.append({"host": h, "fw": "3.2.1" if broken else "3.1.9",
                          "bios": rng.choice(["2.18", "2.19"]), "rack": f"R{rng.randint(1, 40):02d}"})
+    with open(out / "gpus.csv", "w", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=["host", "bdf", "uuid", "model", "hours"])
+        wr.writeheader()
+        wr.writerows(gpu_rows)
     with open(out / "inventory.csv", "w", newline="") as f:
         wr = csv.DictWriter(f, fieldnames=["host", "fw", "bios", "rack"])
         wr.writeheader()
