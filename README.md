@@ -4,7 +4,7 @@
 
 When a whole fleet fails at once, the servers that died instantly could not write down why. Their logs are a storm of identical errors. The cause is usually in the log of the one machine that lived a second longer, and finding it by hand can take weeks.
 
-`glyph-fleet-rca` applies GlyphAI semantic compression (monograph on Zenodo: [ZENODO LINK]) to server event logs. It turns raw lines into concept glyphs, collapses storms into counters, and compares whole servers by their glyph signatures. The survivor stands alone.
+`glyph-fleet-rca` applies GlyphAI semantic compression (monograph on Zenodo: [zenodo.org/records/20813531](https://zenodo.org/records/20813531)) to server event logs. It turns raw lines into concept glyphs, collapses storms into counters, and compares whole servers by their glyph signatures. The survivor stands alone.
 
 > Synthetic data only. No real operator logs are included or were used.
 
