@@ -9,7 +9,8 @@ You need a commercial license if you use this software, the codebook, or works b
 
 Commercial licenses can include support, custom codebooks for your hardware and log formats, and integration help.
 
-**Contact:** Vitali de Mille, de.mille@outlook.com
-https://www.linkedin.com/in/vitali-de-mille-14598034/
+**Contact:** Vitali de Mille
+- Email: de.mille@outlook.com
+- LinkedIn: https://www.linkedin.com/in/vitali-de-mille-14598034/
 
 Copyright (c) 2026 Vitali de Mille.
