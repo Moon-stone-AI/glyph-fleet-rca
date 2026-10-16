@@ -6,8 +6,13 @@ Scenarios in one fleet:
   * bad riser / switch: a few healthy-firmware servers log PCIe errors on several GPUs behind one switch;
   * bad GPU: a few servers log PCIe errors on a single GPU;
   * missing GPU: a few servers lost a GPU from the PCIe tree (surprise link down);
-  * degraded link: a few servers have a GPU trained at x8 instead of x16.
-Logs are written in four dialects: ipmitool text, two vendor-style texts, and raw 16-byte SEL hex.
+  * degraded link: a few servers have a GPU trained at x8 instead of x16;
+  * kernel side (v0.2): the crash storm also shows in the kernel (EDAC, AER, MCE); the missing GPU is
+    reported by the driver too (Xid 79); an application bug hits Xid 13 on many servers within seconds;
+    a few lemon nodes fail in several hardware categories; a few servers log NVLink errors (Xid 74);
+    a couple log an Xid the codebook does not know yet.
+SEL is written in four dialects (ipmitool text, two vendor-style texts, raw 16-byte hex); the kernel log
+in two formats (dmesg -T and journalctl -o short-iso).
 
 (c) 2026 Vitali de Mille. PolyForm Noncommercial 1.0.0.
 """
@@ -136,9 +141,53 @@ class Writer:
                     "vendorH": f"[{self.rid}] {_ts(t)} CRITICAL Operating System failure: Kernel Panic - not syncing: Fatal machine check"}[self.d])
 
 
+# ---------------------------------------------------------------- kernel log writer
+class KernelWriter:
+    def __init__(self, fmt, host, rng):
+        self.fmt, self.host, self.rng, self.lines = fmt, host, rng, []
+
+    def line(self, t, msg):
+        if self.fmt == "dmesg":
+            stamp = time.strftime("[%a %b %d %H:%M:%S %Y]", time.gmtime(t))
+            self.lines.append((t, f"{stamp} {msg}"))
+        else:
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(t))
+            self.lines.append((t, f"{stamp} {self.host} kernel: {msg}"))
+
+    def noise(self, t):
+        for msg in ("Linux version 6.8.0-45-generic (buildd@lcy02-amd64-075) #45-Ubuntu SMP",
+                    "nvidia-nvlink: Nvlink Core is being initialized, major device number 510",
+                    "NVRM: loading NVIDIA UNIX x86_64 Kernel Module  560.35.03",
+                    "mlx5_core 0000:9a:00.0: firmware version: 28.41.1000"):
+            self.line(t, msg)
+            t += 1
+
+    def xid(self, t, bdf, code, text):
+        self.line(t, f"NVRM: Xid (PCI:{bdf[:-2]}): {code}, pid={self.rng.randint(1000, 99999)}, name=python3, {text}")
+
+    def edac_ce(self, t):
+        r = self.rng.randint
+        s, mc, c, d = r(0, 1), r(0, 3), r(0, 1), r(0, 1)
+        self.line(t, f"EDAC MC{mc}: 1 CE memory read error on CPU_SrcID#{s}_MC#{mc}_Chan#{c}_DIMM#{d} "
+                     f"(channel:{c} slot:{d} page:0x{r(4096, 99999):x} offset:0x0 grain:32 syndrome:0x0)")
+
+    def aer_ce(self, t, bdf):
+        self.line(t, f"nvidia {bdf}: PCIe Bus Error: severity=Corrected, type=Physical Layer, (Receiver ID)")
+
+    def mce(self, t):
+        self.line(t, f"mce: [Hardware Error]: CPU {self.rng.randint(0, 63)}: Machine Check: 0 Bank 5: be00000000800400")
+
+    def panic(self, t):
+        self.line(t, "Kernel panic - not syncing: Fatal machine check")
+
+    def text(self):
+        return "\n".join(l for _, l in sorted(self.lines, key=lambda x: x[0])) + "\n"
+
+
 # ---------------------------------------------------------------- fleet
 def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, gpu_fault=5,
-             missing_gpu=6, degraded=3, seed=42) -> dict:
+             missing_gpu=6, degraded=3, seed=42, kernel=True, app_bug=40, lemons=3, nvlink=4,
+             unknown_xid=2) -> dict:
     """Writes a synthetic fleet and returns the ground truth."""
     rng = random.Random(seed)
     out = Path(out)
@@ -152,9 +201,19 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
     miss_hosts = special[switch_fault + gpu_fault:switch_fault + gpu_fault + missing_gpu]
     deg_hosts = special[switch_fault + gpu_fault + missing_gpu:]
     survivor = hosts[rng_pick.randrange(bad)]
+    rest = [h for h in healthy if h not in set(special)]
+    rng_pick.shuffle(rest)
+    lemon_hosts, rest = rest[:lemons], rest[lemons:]
+    nvl_hosts, rest = rest[:nvlink], rest[nvlink:]
+    unk_hosts, rest = rest[:unknown_xid], rest[unknown_xid:]
+    app_hosts = rest[:app_bug]
     truth = {"survivor": survivor, "bad_fw": "3.2.1", "switch_fault": sw_hosts, "gpu_fault": gpu_hosts,
              "missing_gpu": miss_hosts, "degraded": deg_hosts, "bad_switch": "RP1/SW1",
-             "bad_gpu": "RP0/SW0/GPU2", "missing_slot": "RP1/SW1/GPU5", "degraded_slot": "RP0/SW0/GPU1"}
+             "bad_gpu": "RP0/SW0/GPU2", "missing_slot": "RP1/SW1/GPU5", "degraded_slot": "RP0/SW0/GPU1",
+             "app_bug": app_hosts if kernel else [], "lemons": lemon_hosts if kernel else [],
+             "nvlink": nvl_hosts if kernel else [], "unknown_xid": unk_hosts if kernel else []}
+    krng = random.Random(seed + 2)  # kernel content has its own stream, so SEL stays as in v0.1
+    t_app = CRASH_T - 3 * 3600
 
     inv_rows = []
     for i, h in enumerate(hosts):
@@ -163,6 +222,8 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
         tree, where = make_tree(rng, missing=("GPU5",) if h in miss_hosts else (),
                                 degraded=("GPU1",) if h in deg_hosts else ())
         t0 = CRASH_T - 6 * 3600
+        k = KernelWriter(krng.choice(["dmesg", "journal"]), h, krng)
+        k.noise(t0)
         w.boot(t0)
         for _ in range(rng.randint(2, 5)):
             w.temp_ok(t0 + rng.randint(60, 18000))
@@ -173,22 +234,53 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
             for _ in range(rng.randint(20, 60)):
                 w.pcie_corr(t0 + rng.randint(100, 20000), where["GPU2"])
         if h in miss_hosts:
-            w.pcie_link_down(t0 + rng.randint(100, 20000), where["GPU5"])
+            t_ld = t0 + rng.randint(100, 20000)
+            w.pcie_link_down(t_ld, where["GPU5"])
+            k.xid(t_ld + 1, where["GPU5"], 79, "GPU has fallen off the bus.")
         if broken:
             t = CRASH_T - rng.randint(300, 600)
-            for fn, k in ((w.mem_corr, 1), (lambda tt: w.pcie_corr(tt, where[rng.choice(['GPU0', 'GPU3', 'GPU4'])]), 2),
-                          (w.link_down, 1)):
-                for _ in range(rng.randint(*flood) * k):
+            phase = {}
+            for name, fn, mult in (("mem", w.mem_corr, 1),
+                                   ("pcie", lambda tt: w.pcie_corr(tt, where[rng.choice(['GPU0', 'GPU3', 'GPU4'])]), 2),
+                                   ("link", w.link_down, 1)):
+                start = t
+                for _ in range(rng.randint(*flood) * mult):
                     fn(t)
                     t += rng.random() * 0.2
+                phase[name] = (start, t)
             die = CRASH_T + rng.uniform(-0.8, 0.8)
             w.caterr(die)
             if h == survivor:
                 w.panic(die + 1.7)
+            for _ in range(krng.randint(5, 15)):
+                k.edac_ce(krng.uniform(*phase["mem"]))
+            for _ in range(krng.randint(5, 15)):
+                k.aer_ce(krng.uniform(*phase["pcie"]), where[krng.choice(["GPU0", "GPU3", "GPU4"])])
+            k.mce(die - 3)
+            if h == survivor:
+                k.panic(die + 1.7)
+        if h in app_hosts:  # one job crashes on many nodes at once: software, not GPUs
+            k.xid(t_app + krng.uniform(0, 30), where[krng.choice(["GPU0", "GPU1", "GPU2", "GPU3"])], 13,
+                  "Graphics SM Warp Exception on (GPC 1, TPC 2, SM 0): Out Of Range Address")
+        if h in lemon_hosts:  # the same server keeps failing in different ways
+            tl = t0 + krng.randint(100, 15000)
+            k.xid(tl, where["GPU2"], 48, "DBE (double bit error) ECC error.")
+            k.xid(tl + 5, where["GPU2"], 63, "Row remapping event.")
+            for j in range(5):
+                k.edac_ce(tl + 60 + j)
+            for j in range(3):
+                k.aer_ce(tl + 120 + j, where["GPU2"])
+        if h in nvl_hosts:
+            for j in range(krng.randint(2, 5)):
+                k.xid(t0 + 500 + j * 7, where["GPU6"], 74, "NVLink: fatal error detected on link 3.")
+        if h in unk_hosts:
+            k.xid(t0 + 900, where["GPU1"], 154, "GPU recovery action changed from 0x0 (None) to 0x2 (Node Reboot Required).")
         d = out / h
         d.mkdir(exist_ok=True)
         (d / "sel.log").write_text("\n".join(w.lines) + "\n")
         (d / "pcie.txt").write_text("\n".join(tree) + "\n")
+        if kernel:
+            (d / "kernel.log").write_text(k.text())
         inv_rows.append({"host": h, "fw": "3.2.1" if broken else "3.1.9",
                          "bios": rng.choice(["2.18", "2.19"]), "rack": f"R{rng.randint(1, 40):02d}"})
     with open(out / "inventory.csv", "w", newline="") as f:

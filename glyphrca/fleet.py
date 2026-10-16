@@ -49,8 +49,19 @@ def to_runs(events: list[Event]) -> list[Run]:
 
 
 def signature(runs: list[Run], cb: Codebook) -> tuple[str, ...]:
-    """Ordered concepts that matter: info-level events (boot, temperature normal) are dropped."""
-    return tuple(r.concept for r in runs if cb.severity(r.concept) != "info")
+    """Concepts that matter, in order of first appearance. Info-level events are dropped.
+    Order of first appearance (not run order) keeps the signature stable when two sources
+    (SEL and kernel) interleave the same story line by line."""
+    seen, out = set(), []
+    for r in runs:
+        if cb.severity(r.concept) == "info" or r.concept in seen:
+            continue
+        seen.add(r.concept)
+        out.append(r.concept)
+    if SILENCE in seen:  # silence always closes the story
+        out.remove(SILENCE)
+        out.append(SILENCE)
+    return tuple(out)
 
 
 @dataclass
@@ -89,7 +100,12 @@ def build_fleet(events_by_host: dict[str, list[Event]], cb: Codebook) -> FleetVi
     groups: dict[tuple[str, ...], list[str]] = defaultdict(list)
     for h, rs in runs.items():
         groups[signature(rs, cb)].append(h)
-    last_words = {h: (readable(ev[-1]) if ev else "") for h, ev in events_by_host.items()}
+    def last(ev):  # the last thing that mattered, not the last routine line
+        for e in reversed(ev):
+            if cb.severity(e.concept) != "info":
+                return readable(e)
+        return readable(ev[-1]) if ev else ""
+    last_words = {h: last(ev) for h, ev in events_by_host.items()}
     return FleetView(runs, dict(groups), last_words)
 
 
@@ -111,6 +127,49 @@ def simultaneity(fv: FleetView, cb: Codebook, hosts: set[str]) -> float | None:
     times.sort()
     lo, hi = times[int(0.05 * len(times))], times[int(0.95 * len(times)) - 1]
     return hi - lo
+
+
+def software_wide(events_by_host: dict[str, list[Event]], cb: Codebook, exclude: set[str],
+                  window_s: float = 120.0, min_hosts: int | None = None):
+    """Concepts whose cause can be application OR hardware (e.g. Xid 13, 31, 43).
+    Many servers hitting the same one inside a short window points to software (a job, a driver,
+    a library), not to the GPUs. Returns [(concept, hosts_in_window, window_start, window_end, others)]."""
+    n = len(events_by_host)
+    need = min_hosts if min_hosts is not None else max(5, n // 200)
+    first: dict[str, dict[str, float]] = defaultdict(dict)
+    for h, ev in events_by_host.items():
+        if h in exclude:
+            continue
+        for e in ev:
+            if cb.cause(e.concept) == "app_or_hw" and e.ts is not None:
+                first[e.concept].setdefault(h, e.ts)
+    out = []
+    for concept, hosts in first.items():
+        items = sorted(hosts.items(), key=lambda kv: kv[1])
+        best, j = (0, 0, 0), 0
+        for i in range(len(items)):
+            while items[i][1] - items[j][1] > window_s:
+                j += 1
+            if i - j + 1 > best[0]:
+                best = (i - j + 1, j, i)
+        k, j, i = best
+        if k >= need:
+            inside = [h for h, _ in items[j:i + 1]]
+            out.append((concept, inside, items[j][1], items[i][1], [h for h, _ in items if h not in set(inside)]))
+    return out
+
+
+def lemon_nodes(fv: "FleetView", cb: Codebook, exclude: set[str], min_kinds: int = 3):
+    """Servers with recurrent failures across several hardware categories (FLEET.LEMON_NODE).
+    Returns {host: [hardware concepts]} for hosts outside a common-mode crash."""
+    out = {}
+    for h, rs in fv.runs.items():
+        if h in exclude:
+            continue
+        kinds = sorted({r.concept for r in rs if cb.cause(r.concept) == "hardware"})
+        if len(kinds) >= min_kinds:
+            out[h] = kinds
+    return out
 
 
 def load_inventory(path: str) -> dict[str, dict[str, str]]:

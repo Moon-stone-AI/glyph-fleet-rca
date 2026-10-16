@@ -1,0 +1,76 @@
+# GlyphAI fleet-RCA codebook, Linux kernel and GPU domain, v0.2
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# Road 3: Linux kernel log lines (dmesg -T, journalctl -o short-iso) -> concept glyph + arguments.
+# Kernel logs are mostly routine boot noise, so unmatched lines are ignored (counted), not treated as data gaps.
+#
+# Xid descriptions and possible-cause columns follow NVIDIA "Xid Errors" (docs.nvidia.com/deploy/xid-errors).
+# Concept names follow the C_GPU_Faults taxonomy (GPU.BUS.LOST, GPU.MEM.ECC.*, LINK.NVLINK.ERROR, ...).
+#
+# cause: hardware | app_or_hw (application, driver or hardware; decide by fleet pattern) | software
+#        | platform (cooling, power, fabric) | upstream (symptom of something else) | any | none
+
+version: "0.2.0"
+
+concepts:
+  GPU.BUS.LOST:            {severity: crit, cause: hardware,  triage: drain_and_cordon, desc: "GPU has fallen off the bus (Xid 79)"}
+  GPU.MEM.ECC.DBE:         {severity: crit, cause: hardware,  triage: drain_and_cordon, desc: "Double bit ECC error (Xid 48)"}
+  GPU.MEM.ECC.CONTAINED:   {severity: warn, cause: hardware,  triage: restart_app,      desc: "Contained ECC error (Xid 94)"}
+  GPU.MEM.ECC.UNCONTAINED: {severity: crit, cause: hardware,  triage: reset_gpu_now,    desc: "Uncontained ECC error (Xid 95)"}
+  GPU.MEM.ECC.SBE_RATE:    {severity: warn, cause: hardware,  triage: watch_rate,       desc: "High single-bit ECC error rate (Xid 92)"}
+  GPU.MEM.REMAP.EVENT:     {severity: warn, cause: hardware,  triage: reset_gpu_when_idle, desc: "ECC page retirement or row remapping recording event (Xid 63)"}
+  GPU.MEM.REMAP.FAIL:      {severity: crit, cause: hardware,  triage: rma,              desc: "ECC page retirement or row remapper recording failure (Xid 64)"}
+  GPU.CTRL.GSP:            {severity: crit, cause: hardware,  triage: reset_gpu_now,    desc: "GSP RPC timeout / GSP error (Xid 119, 120)"}
+  GPU.UCODE.HALT:          {severity: crit, cause: hardware,  triage: reset_gpu_now,    desc: "Internal micro-controller halt (Xid 62)"}
+  GPU.UCODE.WARN:          {severity: warn, cause: hardware,  triage: observe,          desc: "Internal micro-controller breakpoint/warning (Xid 61)"}
+  GPU.EXEC.EXCEPTION:      {severity: warn, cause: app_or_hw, triage: check_application, desc: "Engine exception, MMU fault, push buffer or channel error (Xid 13, 31, 32, 43, 68, 69)"}
+  GPU.DRIVER.CLEANUP:      {severity: info, cause: upstream,  triage: observe,          desc: "Preemptive cleanup due to previous errors (Xid 45)"}
+  GPU.XID.OTHER:           {severity: warn, cause: app_or_hw, triage: look_up_xid,      desc: "Xid not yet in this codebook (see xid argument)"}
+  LINK.NVLINK.ERROR:       {severity: warn, cause: hardware,  triage: run_diagnostics,  desc: "NVLink error (Xid 74)"}
+  LINK.NVSWITCH.ERROR:     {severity: warn, cause: hardware,  triage: run_diagnostics,  desc: "NVSwitch error (SXid)"}
+  CPU.MCE.LOGGED:          {severity: warn, cause: hardware,  triage: decode_mce,       desc: "Machine check logged by the kernel"}
+  PCIE.UNCORR.NONFATAL:    {severity: warn, cause: hardware,  triage: check_link,       desc: "PCIe uncorrected non-fatal error (AER)"}
+  OS.SOFT_LOCKUP:          {severity: warn, cause: any,       triage: read_stack,       desc: "CPU soft lockup"}
+  OS.HUNG_TASK:            {severity: warn, cause: any,       triage: read_stack,       desc: "Task blocked for too long"}
+  OS.OOM:                  {severity: warn, cause: software,  triage: check_application, desc: "Out of memory, process killed"}
+  THERMAL.THROTTLE:        {severity: warn, cause: platform,  triage: check_cooling,    desc: "CPU clock throttled by temperature"}
+
+# Xid number -> concept
+xid:
+  13: GPU.EXEC.EXCEPTION
+  31: GPU.EXEC.EXCEPTION
+  32: GPU.EXEC.EXCEPTION
+  43: GPU.EXEC.EXCEPTION
+  45: GPU.DRIVER.CLEANUP
+  48: GPU.MEM.ECC.DBE
+  61: GPU.UCODE.WARN
+  62: GPU.UCODE.HALT
+  63: GPU.MEM.REMAP.EVENT
+  64: GPU.MEM.REMAP.FAIL
+  68: GPU.EXEC.EXCEPTION
+  69: GPU.EXEC.EXCEPTION
+  74: LINK.NVLINK.ERROR
+  79: GPU.BUS.LOST
+  92: GPU.MEM.ECC.SBE_RATE
+  94: GPU.MEM.ECC.CONTAINED
+  95: GPU.MEM.ECC.UNCONTAINED
+  119: GPU.CTRL.GSP
+  120: GPU.CTRL.GSP
+
+# Ordered rules: first match wins. Named groups become arguments (bdf, cpu, dimm, xid, sxid).
+kernel:
+  - {name: xid,      re: 'NVRM: Xid \((?:PCI:)?(?P<gpu>[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}(?:\.[0-7])?)\): (?P<xid>\d+)', concept: XID}
+  - {name: sxid,     re: 'SXid \((?:PCI:)?(?P<gpu>[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}(?:\.[0-7])?)\): (?P<sxid>\d+)', concept: LINK.NVSWITCH.ERROR}
+  - {name: panic,    re: 'Kernel panic - not syncing', concept: OS.KERNEL.PANIC}
+  - {name: mce,      re: 'mce: \[Hardware Error\]', concept: CPU.MCE.LOGGED}
+  - {name: edac_ue,  re: 'EDAC MC\d+: \d+ UE ', concept: MEM.ECC.UNCORR}
+  - {name: edac_ce,  re: 'EDAC MC\d+: \d+ CE ', concept: MEM.ECC.CORR}
+  - {name: aer_fat,  re: 'PCIe Bus Error: severity=Uncorrected \(Fatal\)', concept: PCIE.FATAL}
+  - {name: aer_nf,   re: 'PCIe Bus Error: severity=Uncorrected \(Non-Fatal\)', concept: PCIE.UNCORR.NONFATAL}
+  - {name: aer_ce,   re: 'PCIe Bus Error: severity=Corrected', concept: PCIE.CORR}
+  - {name: pciehp,   re: 'pciehp: Slot\(.*\): Link Down', concept: PCIE.LINK.DOWN}
+  - {name: lockup,   re: 'BUG: soft lockup', concept: OS.SOFT_LOCKUP}
+  - {name: hung,     re: 'blocked for more than \d+ seconds', concept: OS.HUNG_TASK}
+  - {name: oom,      re: 'Out of memory: Killed process', concept: OS.OOM}
+  - {name: throttle, re: 'temperature above threshold, cpu clock throttled', concept: THERMAL.THROTTLE}
+  - {name: netdown,  re: '(?:mlx5_core|\bib\d|\beth\d|\bens\w+).*(?:Link DOWN|Link down|link down|lost carrier)', concept: NET.LINK.DOWN}

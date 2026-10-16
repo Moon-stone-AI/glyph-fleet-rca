@@ -1,8 +1,9 @@
-"""Levels 1 and 2: raw SEL line -> word glyphs -> concept glyph + semantic arguments.
+"""Levels 1 and 2: raw log line -> word glyphs -> concept glyph + semantic arguments.
 
-Two roads, one glyph:
+Three roads, one glyph:
   * binary 16-byte IPMI SEL records are decoded by (sensor type, sensor number, offset);
-  * text lines in any vendor dialect go through the lexicon (L1) and phrase rules (L2).
+  * text SEL lines in any vendor dialect go through the lexicon (L1) and phrase rules (L2);
+  * Linux kernel lines (Xid, SXid, MCE, EDAC, AER, panic, ...) go through ordered kernel rules.
 
 (c) 2026 Vitali de Mille. PolyForm Noncommercial 1.0.0.
 """
@@ -16,7 +17,9 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_CODEBOOK = Path(__file__).resolve().parent.parent / "codebook" / "sel_v0.1.yaml"
+CODEBOOK_DIR = Path(__file__).resolve().parent.parent / "codebook"
+DEFAULT_CODEBOOK = CODEBOOK_DIR / "sel_v0.1.yaml"
+DEFAULT_CODEBOOKS = (CODEBOOK_DIR / "sel_v0.1.yaml", CODEBOOK_DIR / "kernel_v0.2.yaml")
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,7 @@ class Event:
     args: tuple[str, ...]     # semantic arguments, e.g. ("bdf=0000:41:00.0",) or ("dimm=A2",)
     words: tuple[str, ...]    # L1 word glyphs (empty for binary records)
     raw: str                  # the original line, kept so a human can read the last words
+    source: str = "sel"       # sel | kernel
 
 
 @dataclass
@@ -36,16 +40,34 @@ class Codebook:
     lexicon: dict
     stop_words: set
     phrases: list = field(default_factory=list)
+    xid: dict = field(default_factory=dict)
+    kernel: list = field(default_factory=list)
 
     @classmethod
-    def load(cls, path: str | Path = DEFAULT_CODEBOOK) -> "Codebook":
-        d = yaml.safe_load(Path(path).read_text())
-        lex = {w: g for g, words in d["lexicon"].items() for w in words}
-        phrases = [(p["concept"], [frozenset(a) for a in p["any_of"]]) for p in d["phrases"]]
-        return cls(d["version"], d["concepts"], d["sel_binary"], lex, set(d["stop_words"]), phrases)
+    def load(cls, paths=DEFAULT_CODEBOOKS) -> "Codebook":
+        """Loads one codebook file or several; later files add concepts and roads."""
+        if isinstance(paths, (str, Path)):
+            paths = (paths,)
+        cb = cls("", {}, [], {}, set(), [])
+        versions = []
+        for path in paths:
+            d = yaml.safe_load(Path(path).read_text())
+            versions.append(str(d.get("version", "")))
+            cb.concepts.update(d.get("concepts", {}))
+            cb.binary += d.get("sel_binary", [])
+            cb.lexicon.update({w: g for g, words in d.get("lexicon", {}).items() for w in words})
+            cb.stop_words |= set(d.get("stop_words", []))
+            cb.phrases += [(p["concept"], [frozenset(a) for a in p["any_of"]]) for p in d.get("phrases", [])]
+            cb.xid.update({int(k): v for k, v in d.get("xid", {}).items()})
+            cb.kernel += [(r["name"], re.compile(r["re"]), r["concept"]) for r in d.get("kernel", [])]
+        cb.version = "+".join(versions)
+        return cb
 
     def severity(self, concept: str) -> str:
         return self.concepts.get(concept, {}).get("severity", "unknown")
+
+    def cause(self, concept: str) -> str:
+        return self.concepts.get(concept, {}).get("cause", "unknown")
 
     def fatal(self, concept: str) -> bool:
         """Concepts that end a node's life (CATERR, kernel panic, thermal trip, ...)."""
@@ -63,6 +85,8 @@ def readable(e: Event) -> str:
 HEX_RECORD = re.compile(r"^\s*([0-9a-fA-F]{2}\s?){16}\s*$")
 TS_US = re.compile(r"(\d{2})/(\d{2})/(\d{4}) \| (\d{2}):(\d{2}):(\d{2})")   # ipmitool: MM/DD/YYYY | hh:mm:ss
 TS_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})")
+TS_DMESG = re.compile(r"\[\w{3} (\w{3}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})\]")  # dmesg -T
+MONTHS = {m: i for i, m in enumerate("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
 # variable fields that never carry meaning: record ids, times, hex values, numbers
 VARIABLE = re.compile(
     r"^\s*[0-9a-f]+(?= \|)|\d{2}/\d{2}/\d{4} \| \d{2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}"
@@ -72,6 +96,8 @@ VARIABLE = re.compile(
 SEM_ARG = re.compile(r"\b(slot|port|cpu|processor|dimm|module)\s+([a-f]?\d+)", re.I)
 BDF = re.compile(r"\b([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])\b", re.I)
 WORD = re.compile(r"[a-z]+(?:-[a-z]+)*")
+EDAC_LOC = re.compile(r"(CPU_SrcID#\d+_MC#\d+_Chan#\d+_DIMM#\d+)")
+CPU_ARG = re.compile(r"\bCPU (\d+)\b")
 ARG_NAME = {"processor": "cpu", "module": "dimm"}
 
 
@@ -84,6 +110,10 @@ def parse_ts(line: str) -> float | None:
     if m:
         y, mo, d, hh, mm, ss = map(int, m.groups())
         return float(calendar.timegm((y, mo, d, hh, mm, ss, 0, 0, 0)))
+    m = TS_DMESG.search(line)
+    if m and m.group(1) in MONTHS:
+        mon, d, hh, mm, ss, y = m.groups()
+        return float(calendar.timegm((int(y), MONTHS[mon], int(d), int(hh), int(mm), int(ss), 0, 0, 0)))
     return None
 
 
@@ -150,6 +180,36 @@ class Encoder:
                 return concept
         return "UNKNOWN"
 
+    # ---- road 3
+    def encode_kernel(self, line: str) -> Event | None:
+        """A kernel line -> Event, or None for routine kernel chatter."""
+        for name, rx, concept in self.cb.kernel:
+            m = rx.search(line)
+            if not m:
+                continue
+            g = m.groupdict()
+            args = []
+            if g.get("gpu"):
+                b = g["gpu"].lower()
+                args.append(f"bdf={b if '.' in b else b + '.0'}")
+            if g.get("xid"):
+                args.append(f"xid={int(g['xid'])}")
+                concept = self.cb.xid.get(int(g["xid"]), "GPU.XID.OTHER")
+            if g.get("sxid"):
+                args.append(f"sxid={int(g['sxid'])}")
+            if not g.get("gpu"):
+                b = BDF.search(line)
+                if b:
+                    args.append(f"bdf={b.group(1).lower()}")
+            loc = EDAC_LOC.search(line)
+            if loc:
+                args.append(f"dimm={loc.group(1)}")
+            c = CPU_ARG.search(line)
+            if c and name == "mce":
+                args.append(f"cpu={c.group(1)}")
+            return Event(parse_ts(line), concept, tuple(args), (), line.rstrip("\n"), "kernel")
+        return None
+
     def encode(self, line: str) -> Event:
         if HEX_RECORD.match(line):
             return self.decode_binary(line)
@@ -160,6 +220,8 @@ class Encoder:
             hit = self._cache[key] = (w, self.concept(w))
         return Event(parse_ts(line), hit[1], text_args(line), hit[0], line.rstrip("\n"))
 
-    def encode_file(self, path: str | Path) -> list[Event]:
+    def encode_file(self, path: str | Path, source: str = "sel") -> list[Event]:
         with open(path, errors="replace") as f:
+            if source == "kernel":
+                return [e for e in (self.encode_kernel(l) for l in f if l.strip()) if e is not None]
             return [self.encode(l) for l in f if l.strip()]

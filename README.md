@@ -17,9 +17,10 @@ When a whole fleet fails at once, the servers that died instantly could not writ
 | **L3** run → concept × count | Identical concepts in a row become one run with a counter, first/last time and argument histogram | `MEM.ECC.CORR ×499 in 51 s, mostly DIMM A2` |
 | **L4** fleet → signatures × servers | Servers with the same story collapse into one signature | `4,999 × … > CPU.IERR.CATERR > SILENCE` |
 
-Two roads lead to the same glyph:
+Three roads lead to the same glyph:
 - **binary IPMI SEL records** (16 bytes) are decoded by sensor type, sensor number and event offset, following Intel's *SEL Troubleshooting Guide*, Rev. 3.8 (tables cited in the codebook);
-- **text logs** in any dialect go through the lexicon (L1) and phrase rules (L2).
+- **text SEL logs** in any dialect go through the lexicon (L1) and phrase rules (L2);
+- **Linux kernel logs** (v0.2: `dmesg -T` or `journalctl -o short-iso`) go through kernel rules: NVIDIA Xid and SXid, MCE, EDAC, PCIe AER, pciehp, kernel panic, lockups, OOM, thermal throttling, NIC link loss. Xid meanings follow NVIDIA's Xid catalog. Routine kernel chatter is ignored and counted.
 
 Words the codebook does not know are not guessed: they surface as data gaps (`?word`) so the codebook can be extended.
 
@@ -64,6 +65,28 @@ What this shows, honestly:
 - **Silence is an event.** Every log ends with `SILENCE`. Thousands of servers going silent in the same second is evidence of a common cause.
 - **The vendor guide is written for one server.** For CATERR it says "update firmware"; for IERR it says "cross test the processors". Applied server by server, that means swapping thousands of CPUs. Seen as a fleet, it is one firmware rollback.
 
+### v0.2: the kernel joins the story
+
+With `kernel.log` next to `sel.log`, each server's story is told by two witnesses merged in time. Results on the same synthetic fleet of 6,000 servers, now with 4.1 million events (SEL + kernel), in about 98 seconds:
+
+```
+Device left the bus (one event, several witnesses):
+  RP1/SW1/GPU5          6 servers   6 by kernel + pcie_tree + sel
+
+Software-wide: GPU.EXEC.EXCEPTION on 40 servers within 28.0 s -> look at the job, driver or library, not at the GPUs
+
+Lemon nodes (several hardware failure kinds on one server -> drain and run diagnostics):
+  node-05066: GPU.MEM.ECC.DBE, GPU.MEM.REMAP.EVENT, MEM.ECC.CORR, PCIE.CORR
+
+Data gaps (Xid codes not in the codebook): {'xid=154': 2}
+```
+
+- **One event, three witnesses.** A GPU that falls off the bus is reported by the BMC (SEL: PCIe surprise link down), by the GPU driver (Xid 79) and by the PCIe tree (device missing). Three formats, one glyph: `GPU.BUS.LOST`.
+- **Application or hardware?** Xid 13, 31 and 43 can be either. On one GPU, look at the GPU. On 40 servers within half a minute, look at the job: nobody should RMA 40 GPUs for one bad kernel launch.
+- **Lemon nodes.** A server failing in several hardware categories (double-bit ECC, row remapping, host memory, PCIe) is drained as a whole, not fixed one symptom at a time.
+- **Unknown Xid codes are reported, not guessed.**
+- **Stable signatures.** A signature is the order in which concepts first appear, so two sources interleaving line by line still tell one story: the survivor is still found.
+
 ### PCIe tree as a map
 Bus numbers differ between servers; slot paths (`RP1/SW1/GPU5`) do not. The most common tree shape is the golden tree. Errors carrying a BDF are mapped onto it:
 - errors on two or more devices behind the same switch, on several servers → **suspect the switch or riser**, not the GPUs;
@@ -84,12 +107,13 @@ python -m glyphrca synth fleet_demo --bad 500 --ok 200      # writes a synthetic
 python -m glyphrca analyze fleet_demo                        # the report
 python -m glyphrca analyze fleet_demo --json report.json \
        --tier2-key "your-secret" --public public.json --private private_codebook.json
-python -m unittest discover -s tests -v                      # 14 tests
+python -m unittest discover -s tests -v                      # 25 tests
 ```
 
 ### Input layout
 ```
 <fleet>/<host>/sel.log     raw SEL: binary hex records and/or text, any dialect, mixed is fine
+<fleet>/<host>/kernel.log  optional: Linux kernel log, dmesg -T or journalctl -o short-iso
 <fleet>/<host>/pcie.txt    optional: <BDF> <parent BDF|-> <kind> <slot> x<w>/x<max> gen<g>/gen<max>
 <fleet>/inventory.csv      optional: host,fw,bios,...
 ```
@@ -97,25 +121,32 @@ python -m unittest discover -s tests -v                      # 14 tests
 ## Repository
 
 ```
-codebook/sel_v0.1.yaml   the codebook: concepts, binary SEL decoding, lexicon, phrase rules
-glyphrca/encode.py       L1, L2 (binary and text roads, template cache)
-glyphrca/fleet.py        L3 runs, L4 signatures, survivors, inventory join, simultaneity
-glyphrca/pcie.py         PCIe tree: golden shape, missing/degraded devices, switch vs device attribution
+codebook/sel_v0.1.yaml   SEL codebook: concepts, binary SEL decoding, lexicon, phrase rules
+codebook/kernel_v0.2.yaml kernel codebook: GPU/NVLink/host concepts, Xid table, kernel rules
+glyphrca/encode.py       L1, L2 (binary, text and kernel roads, template cache)
+glyphrca/fleet.py        L3 runs, L4 signatures, survivors, inventory join, simultaneity,
+                         software-wide failures, lemon nodes
+glyphrca/pcie.py         PCIe tree: golden shape, missing/degraded devices, switch vs device attribution,
+                         bus-loss witnesses across SEL, kernel and tree
 glyphrca/tier2.py        opaque tokens and private codebook
 glyphrca/report.py       pipeline, size accounting, text report
 glyphrca/synth.py        synthetic fleet generator (all scenarios above)
 tests/                   unit and end-to-end tests
 ```
 
-## Limits of v0.1
+## Limits
 
-- The codebook covers a core set of events. Real fleets need the full Intel tables, each vendor's OEM records, Windows Event Log (WHEA) and Linux kernel logs.
+- The codebooks cover a core set of events. Real fleets need the full Intel tables, each vendor's OEM records and Windows Event Log (WHEA).
+- Kernel rules match the common message formats; drivers and kernel versions vary, and new formats surface as ignored lines or data gaps.
 - Synthetic scenarios are cleaner than reality: SEL overflow, BMC clock skew and truncated logs will create noise that v0.1 does not model.
 - Causality is inferred from topology and timing, not proven.
 
 ## Roadmap
 
-Windows Event Log in several languages · Linux dmesg / NVIDIA Xid · full Intel SEL tables · OEM dialects · rate-based states (a burst vs. a slow leak) · interactive fleet view.
+- ~~v0.2 Linux kernel and NVIDIA Xid~~ (done)
+- v0.3 vendor codebooks: Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, full Intel tables, AMD
+- v0.4 Windows Event Log in several languages: one glyph whatever the language
+- later: rate-based states (a burst vs. a slow leak), interactive fleet view
 
 ## License
 

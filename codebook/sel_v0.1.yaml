@@ -13,19 +13,19 @@
 version: "0.1.0"
 
 concepts:
-  SYS.BOOT:          {severity: info, triage: observe,        desc: "System boot / POST complete"}
-  THERMAL.OK:        {severity: info, triage: observe,        desc: "Temperature back within range"}
-  THERMAL.CRIT:      {severity: crit, triage: check_cooling,  desc: "Temperature crossed a critical threshold"}
-  MEM.ECC.CORR:      {severity: warn, triage: watch_rate,     desc: "Correctable memory ECC error (rate matters)"}
-  MEM.ECC.UNCORR:    {severity: crit, fatal: true, triage: replace_dimm,   desc: "Uncorrectable memory ECC error"}
-  PCIE.CORR:         {severity: warn, triage: watch_rate,     desc: "PCIe correctable error"}
-  PCIE.FATAL:        {severity: crit, triage: check_link,     desc: "PCIe fatal error"}
-  PCIE.LINK.DOWN:    {severity: crit, triage: check_link,     desc: "PCIe surprise link down (device fell off the bus)"}
-  NET.LINK.DOWN:     {severity: warn, triage: check_fabric,   desc: "Network link lost"}
-  CPU.IERR.CATERR:   {severity: crit, fatal: true, triage: look_upstream,  desc: "CPU internal / catastrophic error (often caused elsewhere)"}
-  CPU.THERMTRIP:     {severity: crit, fatal: true, triage: check_cooling,  desc: "CPU thermal trip"}
-  PSU.FAIL:          {severity: crit, fatal: true, triage: replace_psu,    desc: "Power supply failure"}
-  OS.KERNEL.PANIC:   {severity: crit, fatal: true, triage: read_last_words, desc: "Operating system critical stop / kernel panic"}
+  SYS.BOOT:          {severity: info, cause: none, triage: observe,        desc: "System boot / POST complete"}
+  THERMAL.OK:        {severity: info, cause: none, triage: observe,        desc: "Temperature back within range"}
+  THERMAL.CRIT:      {severity: crit, cause: platform, triage: check_cooling,  desc: "Temperature crossed a critical threshold"}
+  MEM.ECC.CORR:      {severity: warn, cause: hardware, triage: watch_rate,     desc: "Correctable memory ECC error (rate matters)"}
+  MEM.ECC.UNCORR:    {severity: crit, cause: hardware, fatal: true, triage: replace_dimm,   desc: "Uncorrectable memory ECC error"}
+  PCIE.CORR:         {severity: warn, cause: hardware, triage: watch_rate,     desc: "PCIe correctable error"}
+  PCIE.FATAL:        {severity: crit, cause: hardware, triage: check_link,     desc: "PCIe fatal error"}
+  PCIE.LINK.DOWN:    {severity: crit, cause: hardware, triage: check_link,     desc: "PCIe surprise link down (device fell off the bus)"}
+  NET.LINK.DOWN:     {severity: warn, cause: platform, triage: check_fabric,   desc: "Network link lost"}
+  CPU.IERR.CATERR:   {severity: crit, cause: upstream, fatal: true, triage: look_upstream,  desc: "CPU internal / catastrophic error (often caused elsewhere)"}
+  CPU.THERMTRIP:     {severity: crit, cause: platform, fatal: true, triage: check_cooling,  desc: "CPU thermal trip"}
+  PSU.FAIL:          {severity: crit, cause: hardware, fatal: true, triage: replace_psu,    desc: "Power supply failure"}
+  OS.KERNEL.PANIC:   {severity: crit, cause: any, fatal: true, triage: read_last_words, desc: "Operating system critical stop / kernel panic"}
 
 # ---------------------------------------------------------------- road 1: binary SEL
 # key: st = sensor type, sn = sensor number (null = any), offset (ED1[3:0], null = any); args: decoder name

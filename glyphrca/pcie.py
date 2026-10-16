@@ -67,7 +67,8 @@ class TopologyFindings:
     device_suspects: dict[str, list[str]]       # device path -> hosts with errors on that device only
 
 
-PCIE_CONCEPTS = {"PCIE.CORR", "PCIE.FATAL", "PCIE.LINK.DOWN"}
+PCIE_CONCEPTS = {"PCIE.CORR", "PCIE.FATAL", "PCIE.UNCORR.NONFATAL", "PCIE.LINK.DOWN", "GPU.BUS.LOST"}
+BUS_LOSS = {"PCIE.LINK.DOWN": "sel", "GPU.BUS.LOST": "kernel"}
 
 
 def analyse(trees: dict[str, dict[str, Node]], events_by_host: dict[str, list[Event]],
@@ -105,3 +106,34 @@ def analyse(trees: dict[str, dict[str, Node]], events_by_host: dict[str, list[Ev
             else:
                 device[next(iter(children))].append(h)
     return TopologyFindings(len(golden), dict(missing), dict(degraded), dict(upstream), dict(device))
+
+
+def bus_loss_evidence(trees: dict[str, dict[str, Node]], events_by_host: dict[str, list[Event]]):
+    """One event, several witnesses: a device that left the bus can be reported by the BMC (SEL
+    PCIe surprise link down), by the GPU driver (Xid 79) and by the PCIe tree (device missing).
+    Returns {slot path: {host: sorted list of witnesses}}.
+
+    A device that is gone from the tree has no slot path of its own on that host, so its BDF is
+    matched to the host's single missing slot when there is exactly one."""
+    shapes = Counter(shape(t) for t in trees.values())
+    golden = shapes.most_common(1)[0][0] if shapes else frozenset()
+    out: dict[str, dict[str, list[str]]] = defaultdict(dict)
+    for h, t in trees.items():
+        missing = sorted(p for p, _ in golden - shape(t))
+        witnesses: dict[str, set] = defaultdict(set)
+        for p in missing:
+            witnesses[p].add("pcie_tree")
+        for e in events_by_host.get(h, []):
+            if e.concept not in BUS_LOSS:
+                continue
+            for a in e.args:
+                if not a.startswith("bdf="):
+                    continue
+                b = a[4:]
+                path = slot_path(t, b) if b in t else (missing[0] if len(missing) == 1 else None)
+                if path:
+                    witnesses[path].add(BUS_LOSS[e.concept])
+        for p, w in witnesses.items():
+            out[p][h] = sorted(w)
+    return dict(out)
+

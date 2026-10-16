@@ -2,6 +2,7 @@
 
 Fleet directory layout:
     <fleet>/<host>/sel.log     raw SEL (binary hex records and/or text in any dialect)
+    <fleet>/<host>/kernel.log  optional Linux kernel log (dmesg -T or journalctl -o short-iso)
     <fleet>/<host>/pcie.txt    optional PCIe tree
     <fleet>/inventory.csv      optional: host,fw,bios,...
 
@@ -16,7 +17,8 @@ from pathlib import Path
 
 from . import pcie
 from .encode import Codebook, Encoder
-from .fleet import build_fleet, crashed, inventory_join, load_inventory, simultaneity
+from .fleet import (build_fleet, crashed, inventory_join, lemon_nodes, load_inventory, simultaneity,
+                    software_wide)
 
 TS_BYTES, ID_BYTES = 4, 1
 
@@ -34,14 +36,26 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
     events, trees, raw_bytes, gz_bytes, lines = {}, {}, 0, 0, 0
     l1_bytes = l2_bytes = 0
     unknown_words: Counter = Counter()
+    by_source: Counter = Counter()
+    kernel_ignored = 0
     for d in sorted(p for p in fleet_dir.iterdir() if p.is_dir()):
-        sel = d / "sel.log"
-        if sel.exists():
-            data = sel.read_bytes()
+        ev = []
+        for name, source in (("sel.log", "sel"), ("kernel.log", "kernel")):
+            f = d / name
+            if not f.exists():
+                continue
+            data = f.read_bytes()
             raw_bytes += len(data)
             if gzip_baseline:
                 gz_bytes += len(zlib.compress(data, 6))
-            ev = enc.encode_file(sel)
+            got = enc.encode_file(f, source)
+            if source == "kernel":
+                kernel_ignored += sum(1 for l in data.splitlines() if l.strip()) - len(got)
+            by_source[source] += len(got)
+            ev += got
+        if ev or (d / "sel.log").exists():
+            # one story per server: both sources merged in time order (SEL first on ties)
+            ev.sort(key=lambda e: (e.ts is None, e.ts or 0.0, e.source != "sel"))
             events[d.name] = ev
             lines += len(ev)
             for e in ev:
@@ -67,6 +81,11 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
     spread = simultaneity(fv, cb, cohort)
     common_mode = cohort if (spread is not None and spread < 60 and len(cohort) > 50) else set()
     topo = pcie.analyse(trees, events, exclude=common_mode) if trees else None
+    bus_loss = pcie.bus_loss_evidence(trees, events) if trees else {}
+    sw = software_wide(events, cb, exclude=common_mode)
+    lemons = lemon_nodes(fv, cb, exclude=common_mode)
+    gpu_unknown = Counter(a for ev in events.values() for e in ev if e.concept == "GPU.XID.OTHER"
+                          for a in e.args if a.startswith("xid="))
     elapsed = time.perf_counter() - t0
 
     def attrs(hosts):
@@ -76,9 +95,11 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
         return out
 
     return {
-        "fleet": {"servers": len(events), "lines": lines, "seconds": round(elapsed, 2)},
+        "fleet": {"servers": len(events), "lines": lines, "seconds": round(elapsed, 2),
+                  "by_source": dict(by_source), "kernel_lines_ignored": kernel_ignored},
         "levels": {"raw": raw_bytes, "gzip": gz_bytes, "L1": l1_bytes, "L2": l2_bytes, "L3": l3_bytes, "L4": l4_bytes},
         "unknown_words": dict(unknown_words.most_common(10)),
+        "unknown_xid": dict(gpu_unknown.most_common(10)),
         "signatures": [{"concepts": list(s), "servers": len(hs), "attributes": attrs(hs)} for s, hs in fv.ranked()],
         "survivors": [{"host": h, "signature": list(s), "last_words": fv.last_words[h]}
                       for s, hs in fv.survivors() for h in hs],
@@ -92,13 +113,20 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
         "pcie": {} if topo is None else {
             "missing": topo.missing, "degraded": {p: [h for h, _ in v] for p, v in topo.degraded.items()},
             "upstream_suspects": topo.upstream_suspects, "device_suspects": topo.device_suspects},
+        "bus_loss": bus_loss,
+        "software_wide": [{"concept": c, "hosts": hs, "window_s": round(t1 - t0_, 1), "others": others}
+                          for c, hs, t0_, t1, others in sw],
+        "lemon_nodes": lemons,
     }
 
 
 def render_text(r: dict) -> str:
     L = r["levels"]
     raw = L["raw"] or 1
-    out = [f"Fleet: {r['fleet']['servers']:,} servers, {r['fleet']['lines']:,} SEL lines, "
+    src = r["fleet"].get("by_source", {})
+    out = [f"Fleet: {r['fleet']['servers']:,} servers, {r['fleet']['lines']:,} events "
+           f"({', '.join(f'{k}: {v:,}' for k, v in src.items())}; "
+           f"{r['fleet'].get('kernel_lines_ignored', 0):,} routine kernel lines ignored), "
            f"analysed in {r['fleet']['seconds']} s", "",
            f"{'Level':<30}{'bytes':>15}{'ratio':>11}"]
     names = {"raw": "L0 raw text", "gzip": "   gzip baseline (no meaning)", "L1": "L1 word glyphs + args",
@@ -108,6 +136,8 @@ def render_text(r: dict) -> str:
             out.append(f"{label:<30}{L[k]:>15,}{raw / L[k]:>10,.0f}x")
     if r["unknown_words"]:
         out.append(f"\nData gaps (words not in the codebook): {r['unknown_words']}")
+    if r.get("unknown_xid"):
+        out.append(f"Data gaps (Xid codes not in the codebook): {r['unknown_xid']}")
     out.append("\nFleet signatures:")
     for s in r["signatures"]:
         fw = s["attributes"].get("fw", {})
@@ -136,4 +166,17 @@ def render_text(r: dict) -> str:
                          ("device_suspects", "errors on one device only -> suspect device")):
             for path, hosts in sorted(p.get(k, {}).items(), key=lambda kv: -len(kv[1])):
                 out.append(f"  {label:<58} {path:<18} {len(hosts):>4} servers")
+    if r.get("bus_loss"):
+        out.append("\nDevice left the bus (one event, several witnesses):")
+        for path, hosts in sorted(r["bus_loss"].items(), key=lambda kv: -len(kv[1])):
+            w = Counter(" + ".join(v) for v in hosts.values())
+            out.append(f"  {path:<18} {len(hosts):>4} servers   " + "; ".join(f"{n} by {k}" for k, n in w.items()))
+    for s in r.get("software_wide", []):
+        out.append(f"\nSoftware-wide: {s['concept']} on {len(s['hosts'])} servers within {s['window_s']} s"
+                   f" -> look at the job, driver or library, not at the GPUs"
+                   + (f" ({len(s['others'])} other servers outside the window: check them one by one)" if s["others"] else ""))
+    if r.get("lemon_nodes"):
+        out.append("\nLemon nodes (several hardware failure kinds on one server -> drain and run diagnostics):")
+        for h, kinds in sorted(r["lemon_nodes"].items()):
+            out.append(f"  {h}: {', '.join(kinds)}")
     return "\n".join(out)
