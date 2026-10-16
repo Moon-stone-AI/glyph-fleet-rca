@@ -187,7 +187,7 @@ class KernelWriter:
 # ---------------------------------------------------------------- fleet
 def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, gpu_fault=5,
              missing_gpu=6, degraded=3, seed=42, kernel=True, app_bug=40, lemons=3, nvlink=4,
-             unknown_xid=2) -> dict:
+             unknown_xid=2, escalate=1) -> dict:
     """Writes a synthetic fleet and returns the ground truth."""
     rng = random.Random(seed)
     out = Path(out)
@@ -206,12 +206,14 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
     lemon_hosts, rest = rest[:lemons], rest[lemons:]
     nvl_hosts, rest = rest[:nvlink], rest[nvlink:]
     unk_hosts, rest = rest[:unknown_xid], rest[unknown_xid:]
+    esc_hosts, rest = rest[:escalate + 1], rest[escalate + 1:]  # the last one stays below the limit
     app_hosts = rest[:app_bug]
     truth = {"survivor": survivor, "bad_fw": "3.2.1", "switch_fault": sw_hosts, "gpu_fault": gpu_hosts,
              "missing_gpu": miss_hosts, "degraded": deg_hosts, "bad_switch": "RP1/SW1",
              "bad_gpu": "RP0/SW0/GPU2", "missing_slot": "RP1/SW1/GPU5", "degraded_slot": "RP0/SW0/GPU1",
              "app_bug": app_hosts if kernel else [], "lemons": lemon_hosts if kernel else [],
-             "nvlink": nvl_hosts if kernel else [], "unknown_xid": unk_hosts if kernel else []}
+             "nvlink": nvl_hosts if kernel else [], "unknown_xid": unk_hosts if kernel else [],
+             "escalate": esc_hosts[:escalate] if kernel else [], "escalate_slot": "RP0/SW0/GPU3"}
     krng = random.Random(seed + 2)  # kernel content has its own stream, so SEL stays as in v0.1
     t_app = CRASH_T - 3 * 3600
 
@@ -273,6 +275,10 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
         if h in nvl_hosts:
             for j in range(krng.randint(2, 5)):
                 k.xid(t0 + 500 + j * 7, where["GPU6"], 74, "NVLink: fatal error detected on link 3.")
+        if h in esc_hosts:  # repeated contained ECC errors on one GPU; the last host has only two
+            n = 5 if h in esc_hosts[:escalate] else 2
+            for j in range(n):
+                k.xid(t0 + 2000 + j * 1800, where["GPU3"], 94, "Contained: SM (0x1). RST: No, D-RST: No")
         if h in unk_hosts:
             k.xid(t0 + 900, where["GPU1"], 154, "GPU recovery action changed from 0x0 (None) to 0x2 (Node Reboot Required).")
         d = out / h

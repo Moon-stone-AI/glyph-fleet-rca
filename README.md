@@ -84,6 +84,8 @@ Data gaps (Xid codes not in the codebook): {'xid=154': 2}
 - **One event, three witnesses.** A GPU that falls off the bus is reported by the BMC (SEL: PCIe surprise link down), by the GPU driver (Xid 79) and by the PCIe tree (device missing). Three formats, one glyph: `GPU.BUS.LOST`.
 - **Application or hardware?** Xid 13, 31 and 43 can be either. On one GPU, look at the GPU. On 40 servers within half a minute, look at the job: nobody should RMA 40 GPUs for one bad kernel launch.
 - **Lemon nodes.** A server failing in several hardware categories (double-bit ECC, row remapping, host memory, PCIe) is drained as a whole, not fixed one symptom at a time.
+- **Escalation by rate.** A light triage repeated too often on one GPU (contained ECC errors, row remapping events: more than 3 in 24 h) is escalated to drain and diagnostics: the hardware is degrading.
+- **Practitioner triage.** The Xid triage was reviewed from operations experience: Xid 95 plans for a PCIe reset or reboot because a plain GPU reset often hangs; Xid 63 resets when idle but with a 12 h deadline; Xid 64 drains the node at once before RMA; Xid 13/31/43 return logs to the user instead of punishing the node.
 - **Unknown Xid codes are reported, not guessed.**
 - **Stable signatures.** A signature is the order in which concepts first appear, so two sources interleaving line by line still tell one story: the survivor is still found.
 
@@ -107,7 +109,7 @@ python -m glyphrca synth fleet_demo --bad 500 --ok 200      # writes a synthetic
 python -m glyphrca analyze fleet_demo                        # the report
 python -m glyphrca analyze fleet_demo --json report.json \
        --tier2-key "your-secret" --public public.json --private private_codebook.json
-python -m unittest discover -s tests -v                      # 25 tests
+python -m unittest discover -s tests -v                      # 27 tests
 ```
 
 ### Input layout

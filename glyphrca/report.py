@@ -17,8 +17,8 @@ from pathlib import Path
 
 from . import pcie
 from .encode import Codebook, Encoder
-from .fleet import (build_fleet, crashed, inventory_join, lemon_nodes, load_inventory, simultaneity,
-                    software_wide)
+from .fleet import (build_fleet, crashed, escalations, inventory_join, lemon_nodes, load_inventory,
+                    simultaneity, software_wide)
 
 TS_BYTES, ID_BYTES = 4, 1
 
@@ -84,6 +84,7 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
     bus_loss = pcie.bus_loss_evidence(trees, events) if trees else {}
     sw = software_wide(events, cb, exclude=common_mode)
     lemons = lemon_nodes(fv, cb, exclude=common_mode)
+    esc = escalations(events, cb)
     gpu_unknown = Counter(a for ev in events.values() for e in ev if e.concept == "GPU.XID.OTHER"
                           for a in e.args if a.startswith("xid="))
     elapsed = time.perf_counter() - t0
@@ -117,6 +118,7 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
         "software_wide": [{"concept": c, "hosts": hs, "window_s": round(t1 - t0_, 1), "others": others}
                           for c, hs, t0_, t1, others in sw],
         "lemon_nodes": lemons,
+        "escalations": [{"host": h, "bdf": b, "concept": c, "per_day": n, "to": to} for h, b, c, n, to in esc],
     }
 
 
@@ -179,4 +181,8 @@ def render_text(r: dict) -> str:
         out.append("\nLemon nodes (several hardware failure kinds on one server -> drain and run diagnostics):")
         for h, kinds in sorted(r["lemon_nodes"].items()):
             out.append(f"  {h}: {', '.join(kinds)}")
+    if r.get("escalations"):
+        out.append("\nEscalations (a light triage repeated too often on one GPU):")
+        for e in r["escalations"]:
+            out.append(f"  {e['host']} {e['bdf']}: {e['concept']} x{e['per_day']} in 24 h -> {e['to']}")
     return "\n".join(out)

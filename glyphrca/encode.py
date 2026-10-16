@@ -42,6 +42,7 @@ class Codebook:
     phrases: list = field(default_factory=list)
     xid: dict = field(default_factory=dict)
     kernel: list = field(default_factory=list)
+    escalation: list = field(default_factory=list)
 
     @classmethod
     def load(cls, paths=DEFAULT_CODEBOOKS) -> "Codebook":
@@ -60,11 +61,15 @@ class Codebook:
             cb.phrases += [(p["concept"], [frozenset(a) for a in p["any_of"]]) for p in d.get("phrases", [])]
             cb.xid.update({int(k): v for k, v in d.get("xid", {}).items()})
             cb.kernel += [(r["name"], re.compile(r["re"]), r["concept"]) for r in d.get("kernel", [])]
+            cb.escalation += d.get("escalation", [])
         cb.version = "+".join(versions)
         return cb
 
     def severity(self, concept: str) -> str:
         return self.concepts.get(concept, {}).get("severity", "unknown")
+
+    def triage(self, concept: str) -> str:
+        return self.concepts.get(concept, {}).get("triage", "observe")
 
     def cause(self, concept: str) -> str:
         return self.concepts.get(concept, {}).get("cause", "unknown")

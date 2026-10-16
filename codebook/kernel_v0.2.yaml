@@ -14,16 +14,23 @@ version: "0.2.0"
 
 concepts:
   GPU.BUS.LOST:            {severity: crit, cause: hardware,  triage: drain_and_cordon, desc: "GPU has fallen off the bus (Xid 79)"}
-  GPU.MEM.ECC.DBE:         {severity: crit, cause: hardware,  triage: drain_and_cordon, desc: "Double bit ECC error (Xid 48)"}
-  GPU.MEM.ECC.CONTAINED:   {severity: warn, cause: hardware,  triage: restart_app,      desc: "Contained ECC error (Xid 94)"}
-  GPU.MEM.ECC.UNCONTAINED: {severity: crit, cause: hardware,  triage: reset_gpu_now,    desc: "Uncontained ECC error (Xid 95)"}
+  GPU.MEM.ECC.DBE:         {severity: crit, cause: hardware,  triage: drain_and_cordon, desc: "Double bit ECC error (Xid 48)",
+                            note: "On A100/H100/H200 often followed by Xid 95: expect the same recovery path"}
+  GPU.MEM.ECC.CONTAINED:   {severity: warn, cause: hardware,  triage: restart_app_after_cleanup, desc: "Contained ECC error (Xid 94)",
+                            note: "Stop the process, wait until the driver cleanup (Xid 45) is done and the GPU is available again, then restart; restarting at once on the same GPU can fail again"}
+  GPU.MEM.ECC.UNCONTAINED: {severity: crit, cause: hardware,  triage: pcie_reset_or_reboot, desc: "Uncontained ECC error (Xid 95)",
+                            note: "A plain GPU reset (nvidia-smi -r) often hangs or fails here; plan for a PCIe remove/rescan through sysfs or a node reboot"}
   GPU.MEM.ECC.SBE_RATE:    {severity: warn, cause: hardware,  triage: watch_rate,       desc: "High single-bit ECC error rate (Xid 92)"}
-  GPU.MEM.REMAP.EVENT:     {severity: warn, cause: hardware,  triage: reset_gpu_when_idle, desc: "ECC page retirement or row remapping recording event (Xid 63)"}
-  GPU.MEM.REMAP.FAIL:      {severity: crit, cause: hardware,  triage: rma,              desc: "ECC page retirement or row remapper recording failure (Xid 64)"}
+  GPU.MEM.REMAP.EVENT:     {severity: warn, cause: hardware,  triage: reset_gpu_when_idle, deadline_h: 12, then: drain_and_cordon,
+                            desc: "ECC page retirement or row remapping recording event (Xid 63)",
+                            note: "Long training or inference jobs never leave the GPU idle: reset when idle, but no later than the deadline; then drain the node"}
+  GPU.MEM.REMAP.FAIL:      {severity: crit, cause: hardware,  triage: drain_and_cordon_then_rma, desc: "ECC page retirement or row remapper recording failure (Xid 64)",
+                            note: "Spare rows are used up: take the node out of the scheduler at once and for good, then RMA; an alert alone lets user jobs keep landing on it"}
   GPU.CTRL.GSP:            {severity: crit, cause: hardware,  triage: reset_gpu_now,    desc: "GSP RPC timeout / GSP error (Xid 119, 120)"}
   GPU.UCODE.HALT:          {severity: crit, cause: hardware,  triage: reset_gpu_now,    desc: "Internal micro-controller halt (Xid 62)"}
   GPU.UCODE.WARN:          {severity: warn, cause: hardware,  triage: observe,          desc: "Internal micro-controller breakpoint/warning (Xid 61)"}
-  GPU.EXEC.EXCEPTION:      {severity: warn, cause: app_or_hw, triage: check_application, desc: "Engine exception, MMU fault, push buffer or channel error (Xid 13, 31, 32, 43, 68, 69)"}
+  GPU.EXEC.EXCEPTION:      {severity: warn, cause: app_or_hw, triage: return_logs_to_user, desc: "Engine exception, MMU fault, push buffer or channel error (Xid 13, 31, 32, 43, 68, 69)",
+                            note: "Most often a bug in user code (out-of-bounds access in custom CUDA kernels, memory leaks). Do not punish the node with a reset; reset only if the process is stuck in uninterruptible sleep (state D)"}
   GPU.DRIVER.CLEANUP:      {severity: info, cause: upstream,  triage: observe,          desc: "Preemptive cleanup due to previous errors (Xid 45)"}
   GPU.XID.OTHER:           {severity: warn, cause: app_or_hw, triage: look_up_xid,      desc: "Xid not yet in this codebook (see xid argument)"}
   LINK.NVLINK.ERROR:       {severity: warn, cause: hardware,  triage: run_diagnostics,  desc: "NVLink error (Xid 74)"}
@@ -34,6 +41,14 @@ concepts:
   OS.HUNG_TASK:            {severity: warn, cause: any,       triage: read_stack,       desc: "Task blocked for too long"}
   OS.OOM:                  {severity: warn, cause: software,  triage: check_application, desc: "Out of memory, process killed"}
   THERMAL.THROTTLE:        {severity: warn, cause: platform,  triage: check_cooling,    desc: "CPU clock throttled by temperature"}
+
+# Rate escalation: a light triage repeated too often on one GPU means the hardware is degrading.
+# Counted per server and GPU (bdf) inside a sliding 24 h window.
+escalation:
+  - {concept: GPU.MEM.ECC.CONTAINED, max_per_day: 3, to: drain_and_cordon_and_diagnose}
+  - {concept: GPU.MEM.REMAP.EVENT,   max_per_day: 3, to: drain_and_cordon_and_diagnose}
+
+# Practitioner review of the triage above: Vitali de Mille, 16 Oct 2026.
 
 # Xid number -> concept
 xid:

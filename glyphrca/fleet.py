@@ -159,6 +159,30 @@ def software_wide(events_by_host: dict[str, list[Event]], cb: Codebook, exclude:
     return out
 
 
+def escalations(events_by_host: dict[str, list[Event]], cb: Codebook, window_s: float = 86400.0):
+    """A light triage repeated too often on one GPU means degrading hardware.
+    For each escalation rule, count the concept per server and GPU inside a sliding 24 h window.
+    Returns [(host, bdf, concept, peak_count, rule_to)]."""
+    rules = {r["concept"]: r for r in cb.escalation}
+    out = []
+    for h, ev in events_by_host.items():
+        times: dict[tuple[str, str], list[float]] = defaultdict(list)
+        for e in ev:
+            if e.concept in rules and e.ts is not None:
+                bdf = next((a[4:] for a in e.args if a.startswith("bdf=")), "?")
+                times[(e.concept, bdf)].append(e.ts)
+        for (concept, bdf), ts in times.items():
+            ts.sort()
+            peak, j = 0, 0
+            for i in range(len(ts)):
+                while ts[i] - ts[j] > window_s:
+                    j += 1
+                peak = max(peak, i - j + 1)
+            if peak > rules[concept]["max_per_day"]:
+                out.append((h, bdf, concept, peak, rules[concept]["to"]))
+    return sorted(out)
+
+
 def lemon_nodes(fv: "FleetView", cb: Codebook, exclude: set[str], min_kinds: int = 3):
     """Servers with recurrent failures across several hardware categories (FLEET.LEMON_NODE).
     Returns {host: [hardware concepts]} for hosts outside a common-mode crash."""

@@ -110,6 +110,19 @@ class FleetV02(unittest.TestCase):
     def test_unknown_xid_reported_as_gap(self):
         self.assertEqual(self.r["unknown_xid"], {"xid=154": len(self.truth["unknown_xid"])})
 
+    def test_repeated_light_triage_escalates(self):
+        esc = self.r["escalations"]
+        self.assertEqual(sorted(e["host"] for e in esc), sorted(self.truth["escalate"]))
+        self.assertTrue(all(e["concept"] == "GPU.MEM.ECC.CONTAINED" and e["per_day"] == 5
+                            and e["to"] == "drain_and_cordon_and_diagnose" for e in esc))
+
+    def test_practitioner_triage(self):
+        cb = Codebook.load()
+        self.assertEqual(cb.triage("GPU.MEM.ECC.UNCONTAINED"), "pcie_reset_or_reboot")
+        self.assertEqual(cb.triage("GPU.MEM.REMAP.FAIL"), "drain_and_cordon_then_rma")
+        self.assertEqual(cb.triage("GPU.EXEC.EXCEPTION"), "return_logs_to_user")
+        self.assertEqual(cb.concepts["GPU.MEM.REMAP.EVENT"]["deadline_h"], 12)
+
     def test_v01_findings_unchanged(self):
         self.assertEqual([(f["attribute"], f["value"]) for f in self.r["inventory"]], [("fw", "3.2.1")])
         self.assertEqual(set(self.r["pcie"]["upstream_suspects"]), {self.truth["bad_switch"]})
