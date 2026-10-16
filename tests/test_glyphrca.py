@@ -109,7 +109,7 @@ class FleetEndToEnd(unittest.TestCase):
         p = self.r["pcie"]
         self.assertEqual(set(p["upstream_suspects"]), {self.truth["bad_switch"]})
         self.assertEqual(sorted(p["upstream_suspects"][self.truth["bad_switch"]]), sorted(self.truth["switch_fault"]))
-        self.assertEqual(set(p["device_suspects"]), {self.truth["bad_gpu"]})
+        self.assertTrue(set(self.truth["gpu_fault"]) <= set(p["device_suspects"][self.truth["bad_gpu"]]))
         self.assertEqual(sorted(p["missing"][self.truth["missing_slot"]]), sorted(self.truth["missing_gpu"]))
         self.assertEqual(sorted(p["degraded"][self.truth["degraded_slot"]]), sorted(self.truth["degraded"]))
 

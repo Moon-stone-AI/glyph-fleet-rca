@@ -1,0 +1,47 @@
+# GlyphAI fleet-RCA codebook, GPU telemetry domain (DCGM), v0.2
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# Road 4: telemetry samples -> concept glyphs, before any Xid is written.
+# Event logs make a reactive system; counters and gauges catch degradation early.
+#
+# Each metric is known under two names: the dcgm-exporter metric name and the canonical DCGM field
+# (docs.nvidia.com/datacenter/dcgm: "DCGM Exporter Metrics" and "Field Identifiers"). Both map to one glyph.
+#
+# Input: <fleet>/<host>/dcgm.csv with columns  timestamp,gpu,field,value
+#   timestamp: ISO 8601; gpu: PCI bus id (0000:41:00.0); field: either name; value: number.
+#
+# Thresholds are starting values, to be tuned per fleet.
+
+version: "0.2.0"
+
+concepts:
+  LINK.NVLINK.CRC_RATE:    {severity: warn, cause: hardware, triage: run_diagnostics,
+                            desc: "NVLink CRC flit errors at a high rate (retries; bandwidth loss or hangs without an Xid yet)"}
+  PCIE.REPLAY_RATE:        {severity: warn, cause: hardware, triage: check_link,
+                            desc: "PCIe replays at a high rate (unstable link; can come with a link downtrain)"}
+  GPU.MEM.REMAP.LOW_SPARE: {severity: warn, cause: hardware, triage: scheduled_maintenance,
+                            desc: "Memory banks with low or no spare rows left for remapping",
+                            note: "DCGM reports spare rows as a per-bank histogram (max, high, partial, low, none), not a percentage; any bank in low or none is the trigger. Plan maintenance before Xid 64."}
+
+  POWER.THROTTLE:          {severity: warn, cause: platform, triage: check_power_infrastructure,
+                            desc: "GPU held back by power limits for a large share of time",
+                            note: "Persistent power braking under normal load points to PDUs, PSUs or board power rails: flag for infrastructure maintenance"}
+  GPU.THERMAL.THROTTLE:    {severity: warn, cause: platform, triage: check_cooling,
+                            desc: "GPU held back by thermal limits for a large share of time"}
+
+metrics:
+  - {glyph: LINK.NVLINK.CRC_RATE, kind: counter, rate_per_min_above: 100,
+     names: [DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_COUNT_TOTAL, DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_TOTAL]}
+  - {glyph: PCIE.REPLAY_RATE, kind: counter, rate_per_min_above: 10,
+     names: [DCGM_FI_DEV_PCIE_REPLAY_COUNTER, DCGM_FI_DEV_PCIE_REPLAY_TOTAL]}
+  - {glyph: GPU.MEM.REMAP.FAIL, kind: gauge, value_above: 0,
+     names: [DCGM_FI_DEV_ROW_REMAP_FAILURE, DCGM_FI_DEV_ROW_REMAP_FAILED]}
+  - {glyph: GPU.MEM.REMAP.EVENT, kind: gauge, value_above: 0,
+     names: [DCGM_FI_DEV_ROW_REMAP_PENDING]}
+  - {glyph: GPU.MEM.REMAP.LOW_SPARE, kind: gauge, value_above: 0,
+     names: [DCGM_FI_DEV_BANK_REMAP_AVAIL_LOW, DCGM_FI_DEV_BANK_REMAP_AVAIL_NONE]}
+  # violation counters are in nanoseconds; 1.8e10 ns per minute = throttled 30 % of the time
+  - {glyph: POWER.THROTTLE, kind: counter, rate_per_min_above: 1.8e10,
+     names: [DCGM_FI_DEV_POWER_VIOLATION]}
+  - {glyph: GPU.THERMAL.THROTTLE, kind: counter, rate_per_min_above: 1.8e10,
+     names: [DCGM_FI_DEV_THERMAL_VIOLATION]}

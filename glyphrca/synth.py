@@ -187,7 +187,7 @@ class KernelWriter:
 # ---------------------------------------------------------------- fleet
 def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, gpu_fault=5,
              missing_gpu=6, degraded=3, seed=42, kernel=True, app_bug=40, lemons=3, nvlink=4,
-             unknown_xid=2, escalate=1) -> dict:
+             unknown_xid=2, escalate=1, telemetry=True) -> dict:
     """Writes a synthetic fleet and returns the ground truth."""
     rng = random.Random(seed)
     out = Path(out)
@@ -207,13 +207,27 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
     nvl_hosts, rest = rest[:nvlink], rest[nvlink:]
     unk_hosts, rest = rest[:unknown_xid], rest[unknown_xid:]
     esc_hosts, rest = rest[:escalate + 1], rest[escalate + 1:]  # the last one stays below the limit
+    def take(n):
+        nonlocal rest
+        got, rest = rest[:n], rest[n:]
+        return got
+    zombie_hosts, fm_hosts, orphan_hosts, gsp_hosts = take(1), take(2), take(1), take(1)
+    crc_hosts, replay_hosts, spare_hosts, power_hosts = take(3), take(2), take(2), take(2)
+    control_hosts = take(10)
+    iommu_hosts, storm_hosts, init_hosts = take(1), take(1), take(1)
     app_hosts = rest[:app_bug]
     truth = {"survivor": survivor, "bad_fw": "3.2.1", "switch_fault": sw_hosts, "gpu_fault": gpu_hosts,
              "missing_gpu": miss_hosts, "degraded": deg_hosts, "bad_switch": "RP1/SW1",
              "bad_gpu": "RP0/SW0/GPU2", "missing_slot": "RP1/SW1/GPU5", "degraded_slot": "RP0/SW0/GPU1",
              "app_bug": app_hosts if kernel else [], "lemons": lemon_hosts if kernel else [],
              "nvlink": nvl_hosts if kernel else [], "unknown_xid": unk_hosts if kernel else [],
-             "escalate": esc_hosts[:escalate] if kernel else [], "escalate_slot": "RP0/SW0/GPU3"}
+             "escalate": esc_hosts[:escalate] if kernel else [], "escalate_slot": "RP0/SW0/GPU3",
+             "zombie": zombie_hosts if kernel else [], "fabric_manager": fm_hosts if kernel else [],
+             "orphan_xid45": orphan_hosts if kernel else [], "gsp_repeat": gsp_hosts if kernel else [],
+             "iommu": iommu_hosts if kernel else [], "aer_storm": storm_hosts if kernel else [],
+             "init_fail": init_hosts if kernel else [],
+             "telemetry": {"LINK.NVLINK.CRC_RATE": crc_hosts, "PCIE.REPLAY_RATE": replay_hosts,
+                           "GPU.MEM.REMAP.LOW_SPARE": spare_hosts, "POWER.THROTTLE": power_hosts} if telemetry else {}}
     krng = random.Random(seed + 2)  # kernel content has its own stream, so SEL stays as in v0.1
     t_app = CRASH_T - 3 * 3600
 
@@ -275,6 +289,43 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
         if h in nvl_hosts:
             for j in range(krng.randint(2, 5)):
                 k.xid(t0 + 500 + j * 7, where["GPU6"], 74, "NVLink: fatal error detected on link 3.")
+        if h in zombie_hosts:  # uncontained ECC, then a task stuck in state D
+            k.xid(t0 + 3000, where["GPU7"], 95, "Uncontained: FBHUB. RST: Yes, D-RST: No")
+            k.line(t0 + 3200, "INFO: task python3:4242 blocked for more than 120 seconds.")
+        if h in iommu_hosts:
+            k.line(t0 + 7000, "DMAR: DRHD: handling fault status reg 2")
+            k.line(t0 + 7000, "DMAR: [DMA Write NO_PASID] Request device [9a:00.0] fault addr 0x7f2a1000 [fault reason 0x05] PTE Write access is not set")
+        if h in storm_hosts:  # a failing riser floods the log
+            for j in range(1500):
+                k.aer_ce(t0 + 8000 + j * 0.02, where["GPU5"])
+        if h in init_hosts:
+            k.line(t0 + 30, f"NVRM: GPU {where['GPU1']}: RmInitAdapter failed! (0x62:0x55:2477)")
+        if h in fm_hosts:
+            k.line(t0 + 4000, "nvidia-fabricmanager.service: Main process exited, code=exited, status=1/FAILURE")
+        if h in orphan_hosts:  # cleanup with no earlier error: the root cause line was lost
+            k.xid(t0 + 5000, where["GPU0"], 45, "Ch 00000010")
+        if h in lemon_hosts:  # cleanup right after a real error: not an orphan
+            k.xid(tl + 10, where["GPU2"], 45, "Ch 00000008")
+        if h in gsp_hosts:
+            for j in range(2):
+                k.xid(t0 + 6000 + j * 3600, where["GPU4"], 119, "Timeout after 6s of waiting for RPC response from GPU0 GSP!")
+        if telemetry and h in crc_hosts + replay_hosts + spare_hosts + power_hosts + control_hosts:
+            rows = ["timestamp,gpu,field,value"]
+            names = {"crc": krng.choice(["DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_COUNT_TOTAL", "DCGM_FI_DEV_NVLINK_CRC_FLIT_ERROR_TOTAL"]),
+                     "replay": krng.choice(["DCGM_FI_DEV_PCIE_REPLAY_COUNTER", "DCGM_FI_DEV_PCIE_REPLAY_TOTAL"])}
+            for step in range(13):  # one sample every 5 minutes for an hour
+                ts_s = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 + 7200 + step * 300))
+                for slot in ("GPU0", "GPU6"):
+                    bdf = where[slot]
+                    crc = step * (5 * 300 if (h in crc_hosts and slot == "GPU6") else 2)          # 300/min vs ~0
+                    rep = step * (5 * 50 if (h in replay_hosts and slot == "GPU0") else 1)        # 50/min vs ~0
+                    pwr = step * int((0.6 if h in power_hosts else 0.01) * 300e9)                  # 60 % vs 1 % of time
+                    low = 1 if (h in spare_hosts and slot == "GPU6" and step >= 6) else 0
+                    rows += [f"{ts_s},{bdf},{names['crc']},{crc}", f"{ts_s},{bdf},{names['replay']},{rep}",
+                             f"{ts_s},{bdf},DCGM_FI_DEV_POWER_VIOLATION,{pwr}",
+                             f"{ts_s},{bdf},DCGM_FI_DEV_BANK_REMAP_AVAIL_LOW,{low}"]
+            (out / h).mkdir(exist_ok=True)
+            (out / h / "dcgm.csv").write_text("\n".join(rows) + "\n")
         if h in esc_hosts:  # repeated contained ECC errors on one GPU; the last host has only two
             n = 5 if h in esc_hosts[:escalate] else 2
             for j in range(n):

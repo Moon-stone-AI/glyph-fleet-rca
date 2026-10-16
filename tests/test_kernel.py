@@ -111,10 +111,11 @@ class FleetV02(unittest.TestCase):
         self.assertEqual(self.r["unknown_xid"], {"xid=154": len(self.truth["unknown_xid"])})
 
     def test_repeated_light_triage_escalates(self):
-        esc = self.r["escalations"]
+        esc = [e for e in self.r["escalations"] if e["concept"] == "GPU.MEM.ECC.CONTAINED"]
         self.assertEqual(sorted(e["host"] for e in esc), sorted(self.truth["escalate"]))
-        self.assertTrue(all(e["concept"] == "GPU.MEM.ECC.CONTAINED" and e["per_day"] == 5
-                            and e["to"] == "drain_and_cordon_and_diagnose" for e in esc))
+        self.assertTrue(all(e["per_day"] == 5 and e["to"] == "drain_and_cordon_and_diagnose" for e in esc))
+        gsp = [e["host"] for e in self.r["escalations"] if e["concept"] == "GPU.CTRL.GSP"]
+        self.assertEqual(gsp, self.truth["gsp_repeat"])
 
     def test_practitioner_triage(self):
         cb = Codebook.load()
@@ -122,6 +123,25 @@ class FleetV02(unittest.TestCase):
         self.assertEqual(cb.triage("GPU.MEM.REMAP.FAIL"), "drain_and_cordon_then_rma")
         self.assertEqual(cb.triage("GPU.EXEC.EXCEPTION"), "return_logs_to_user")
         self.assertEqual(cb.concepts["GPU.MEM.REMAP.EVENT"]["deadline_h"], 12)
+
+    def test_telemetry_early_warnings_from_both_metric_dialects(self):
+        got = {c: sorted(h) for c, h in self.r["telemetry"].items()}
+        for concept, hosts in self.truth["telemetry"].items():
+            self.assertEqual(got.get(concept), sorted(hosts), concept)
+        self.assertNotIn("GPU.THERMAL.THROTTLE", got)  # control hosts stay quiet
+
+    def test_zombie_fabric_orphan_iommu_storm_init(self):
+        self.assertEqual(sorted(self.r["zombies"]), self.truth["zombie"])
+        self.assertEqual(self.r["fabric_manager_down"], sorted(self.truth["fabric_manager"]))
+        self.assertEqual([o["host"] for o in self.r["orphan_cleanups"]], self.truth["orphan_xid45"])
+        self.assertEqual(self.r["iommu_faults"], self.truth["iommu"])
+        self.assertEqual(sorted(self.r["aer_storms"]), self.truth["aer_storm"])
+        self.assertEqual(self.r["gpu_init_failures"], self.truth["init_fail"])
+
+    def test_gsp_is_driver_or_hardware_not_user_app(self):
+        cb = Codebook.load()
+        self.assertEqual(cb.cause("GPU.CTRL.GSP"), "driver_or_hw")
+        self.assertEqual(cb.triage("GPU.CTRL.GSP"), "reset_gpu_then_watch")
 
     def test_v01_findings_unchanged(self):
         self.assertEqual([(f["attribute"], f["value"]) for f in self.r["inventory"]], [("fw", "3.2.1")])

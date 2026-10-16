@@ -19,7 +19,8 @@ import yaml
 
 CODEBOOK_DIR = Path(__file__).resolve().parent.parent / "codebook"
 DEFAULT_CODEBOOK = CODEBOOK_DIR / "sel_v0.1.yaml"
-DEFAULT_CODEBOOKS = (CODEBOOK_DIR / "sel_v0.1.yaml", CODEBOOK_DIR / "kernel_v0.2.yaml")
+DEFAULT_CODEBOOKS = (CODEBOOK_DIR / "sel_v0.1.yaml", CODEBOOK_DIR / "kernel_v0.2.yaml",
+                     CODEBOOK_DIR / "telemetry_v0.2.yaml")
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class Event:
     args: tuple[str, ...]     # semantic arguments, e.g. ("bdf=0000:41:00.0",) or ("dimm=A2",)
     words: tuple[str, ...]    # L1 word glyphs (empty for binary records)
     raw: str                  # the original line, kept so a human can read the last words
-    source: str = "sel"       # sel | kernel
+    source: str = "sel"       # sel | kernel | telemetry
 
 
 @dataclass
@@ -43,6 +44,8 @@ class Codebook:
     xid: dict = field(default_factory=dict)
     kernel: list = field(default_factory=list)
     escalation: list = field(default_factory=list)
+    metrics: dict = field(default_factory=dict)   # metric name (exporter or DCGM field) -> rule
+    aer_storm: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, paths=DEFAULT_CODEBOOKS) -> "Codebook":
@@ -62,6 +65,10 @@ class Codebook:
             cb.xid.update({int(k): v for k, v in d.get("xid", {}).items()})
             cb.kernel += [(r["name"], re.compile(r["re"]), r["concept"]) for r in d.get("kernel", [])]
             cb.escalation += d.get("escalation", [])
+            cb.aer_storm.update(d.get("aer_storm", {}))
+            for m in d.get("metrics", []):
+                for n in m["names"]:
+                    cb.metrics[n] = m
         cb.version = "+".join(versions)
         return cb
 
@@ -215,6 +222,40 @@ class Encoder:
             return Event(parse_ts(line), concept, tuple(args), (), line.rstrip("\n"), "kernel")
         return None
 
+    # ---- road 4
+    def encode_telemetry_file(self, path: str | Path) -> list[Event]:
+        """dcgm.csv (timestamp,gpu,field,value) -> events where a rule's threshold is crossed.
+        Counters become rates per minute between consecutive samples of the same GPU and metric;
+        gauges fire when they turn on (not on every sample, so a stuck gauge is one event)."""
+        import csv
+        rows = []
+        with open(path, newline="") as f:
+            for row in csv.DictReader(f):
+                rule = self.cb.metrics.get(row.get("field", ""))
+                ts = parse_ts(row.get("timestamp", ""))
+                if rule is None or ts is None:
+                    continue
+                rows.append((ts, row["gpu"].lower(), rule, float(row["value"]), row))
+        rows.sort(key=lambda r: r[0])
+        last: dict = {}
+        out = []
+        for ts, gpu, rule, value, row in rows:
+            key = (gpu, rule["glyph"], rule["kind"])
+            prev = last.get(key)
+            last[key] = (ts, value)
+            line = f"{row['timestamp']},{row['gpu']},{row['field']},{row['value']}"
+            if rule["kind"] == "counter":
+                if prev is None or ts <= prev[0] or value < prev[1]:
+                    continue  # first sample, or a counter reset
+                rate = (value - prev[1]) / ((ts - prev[0]) / 60.0)
+                if rate > float(rule["rate_per_min_above"]):
+                    out.append(Event(ts, rule["glyph"], (f"bdf={gpu}",), (), f"{line}  [{rate:,.0f}/min]", "telemetry"))
+            else:
+                was_on = prev is not None and prev[1] > float(rule["value_above"])
+                if value > float(rule["value_above"]) and not was_on:
+                    out.append(Event(ts, rule["glyph"], (f"bdf={gpu}",), (), line, "telemetry"))
+        return out
+
     def encode(self, line: str) -> Event:
         if HEX_RECORD.match(line):
             return self.decode_binary(line)
@@ -226,6 +267,8 @@ class Encoder:
         return Event(parse_ts(line), hit[1], text_args(line), hit[0], line.rstrip("\n"))
 
     def encode_file(self, path: str | Path, source: str = "sel") -> list[Event]:
+        if source == "telemetry":
+            return self.encode_telemetry_file(path)
         with open(path, errors="replace") as f:
             if source == "kernel":
                 return [e for e in (self.encode_kernel(l) for l in f if l.strip()) if e is not None]

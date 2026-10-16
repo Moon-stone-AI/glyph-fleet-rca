@@ -3,6 +3,7 @@
 Fleet directory layout:
     <fleet>/<host>/sel.log     raw SEL (binary hex records and/or text in any dialect)
     <fleet>/<host>/kernel.log  optional Linux kernel log (dmesg -T or journalctl -o short-iso)
+    <fleet>/<host>/dcgm.csv    optional GPU telemetry: timestamp,gpu,field,value
     <fleet>/<host>/pcie.txt    optional PCIe tree
     <fleet>/inventory.csv      optional: host,fw,bios,...
 
@@ -18,13 +19,17 @@ from pathlib import Path
 from . import pcie
 from .encode import Codebook, Encoder
 from .fleet import (build_fleet, crashed, escalations, inventory_join, lemon_nodes, load_inventory,
-                    simultaneity, software_wide)
+                    orphan_cleanups, simultaneity, software_wide, zombie_gpus, aer_storms)
 
 TS_BYTES, ID_BYTES = 4, 1
 
 
 def _argb(args) -> int:
     return sum(len(a) for a in args) + 1
+
+
+def _bdf_of(e) -> str:
+    return next((a[4:] for a in e.args if a.startswith("bdf=")), "?")
 
 
 def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_baseline: bool = True) -> dict:
@@ -40,7 +45,7 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
     kernel_ignored = 0
     for d in sorted(p for p in fleet_dir.iterdir() if p.is_dir()):
         ev = []
-        for name, source in (("sel.log", "sel"), ("kernel.log", "kernel")):
+        for name, source in (("sel.log", "sel"), ("kernel.log", "kernel"), ("dcgm.csv", "telemetry")):
             f = d / name
             if not f.exists():
                 continue
@@ -85,6 +90,17 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
     sw = software_wide(events, cb, exclude=common_mode)
     lemons = lemon_nodes(fv, cb, exclude=common_mode)
     esc = escalations(events, cb)
+    zombies = zombie_gpus(events)
+    orphans = orphan_cleanups(events)
+    storms = aer_storms(events, cb)
+    iommu = sorted(h for h, ev in events.items() if any(e.concept == "HOST.IOMMU.FAULT" for e in ev))
+    init_fail = sorted(h for h, ev in events.items() if any(e.concept == "GPU.INIT.FAIL" for e in ev))
+    telemetry = {}
+    for h, ev in events.items():
+        for e in ev:
+            if e.source == "telemetry":
+                telemetry.setdefault(e.concept, {}).setdefault(h, set()).add(_bdf_of(e))
+    fabric = sorted(h for h, ev in events.items() if any(e.concept == "FABRIC.MANAGER.DOWN" for e in ev))
     gpu_unknown = Counter(a for ev in events.values() for e in ev if e.concept == "GPU.XID.OTHER"
                           for a in e.args if a.startswith("xid="))
     elapsed = time.perf_counter() - t0
@@ -119,6 +135,15 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
                           for c, hs, t0_, t1, others in sw],
         "lemon_nodes": lemons,
         "escalations": [{"host": h, "bdf": b, "concept": c, "per_day": n, "to": to} for h, b, c, n, to in esc],
+        "zombies": {h: {"trigger": c, "bdf": b} for h, (c, b) in zombies.items()},
+        "orphan_cleanups": [{"host": h, "bdf": b} for h, b in orphans],
+        "telemetry": {c: {h: sorted(b) for h, b in hs.items()} for c, hs in telemetry.items()},
+        "fabric_manager_down": fabric,
+        "aer_storms": storms,
+        "iommu_faults": iommu,
+        "gpu_init_failures": init_fail,
+        "triage": {c: {"triage": cb.triage(c), "note": cb.concepts.get(c, {}).get("note", "")}
+                   for c in sorted({e.concept for ev in events.values() for e in ev}) if c in cb.concepts},
     }
 
 
@@ -181,6 +206,29 @@ def render_text(r: dict) -> str:
         out.append("\nLemon nodes (several hardware failure kinds on one server -> drain and run diagnostics):")
         for h, kinds in sorted(r["lemon_nodes"].items()):
             out.append(f"  {h}: {', '.join(kinds)}")
+    if r.get("telemetry"):
+        out.append("\nEarly warnings from telemetry (before any Xid):")
+        for c, hosts in sorted(r["telemetry"].items()):
+            out.append(f"  {c:<26} {len(hosts):>4} servers -> {r['triage'].get(c, {}).get('triage', '')}")
+    if r.get("zombies"):
+        out.append("\nZombie GPUs (blocked task after the error: soft restarts will hang -> reboot or PCIe hot-plug reset):")
+        for h, z in sorted(r["zombies"].items()):
+            out.append(f"  {h} {z['bdf']}: {z['trigger']} then OS.HUNG_TASK")
+    if r.get("orphan_cleanups"):
+        out.append("\nXid 45 with no earlier error on the same GPU (root cause probably lost -> run nvidia-smi -q):")
+        for o in r["orphan_cleanups"]:
+            out.append(f"  {o['host']} {o['bdf']}")
+    if r.get("fabric_manager_down"):
+        out.append(f"\nFabric Manager down on {len(r['fabric_manager_down'])} servers -> multi-node jobs will hang "
+                   f"at the first collective: drain now: {', '.join(r['fabric_manager_down'])}")
+    if r.get("aer_storms"):
+        out.append("\nAER storms (the host may lock up writing logs -> isolate now, rate-limit AER logging):")
+        for h, n in sorted(r["aer_storms"].items()):
+            out.append(f"  {h}: {n:,} PCIe AER messages in one minute")
+    if r.get("iommu_faults"):
+        out.append(f"\nIOMMU / DMA remapping faults (GPUDirect traffic stalls, no Xid) -> reboot: {', '.join(r['iommu_faults'])}")
+    if r.get("gpu_init_failures"):
+        out.append(f"\nGPU driver failed to initialise -> check retirement records, then re-initialise: {', '.join(r['gpu_init_failures'])}")
     if r.get("escalations"):
         out.append("\nEscalations (a light triage repeated too often on one GPU):")
         for e in r["escalations"]:

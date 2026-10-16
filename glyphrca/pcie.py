@@ -67,7 +67,8 @@ class TopologyFindings:
     device_suspects: dict[str, list[str]]       # device path -> hosts with errors on that device only
 
 
-PCIE_CONCEPTS = {"PCIE.CORR", "PCIE.FATAL", "PCIE.UNCORR.NONFATAL", "PCIE.LINK.DOWN", "GPU.BUS.LOST"}
+PCIE_CONCEPTS = {"PCIE.CORR", "PCIE.FATAL", "PCIE.UNCORR.NONFATAL", "PCIE.LINK.DOWN", "GPU.BUS.LOST",
+                 "PCIE.REPLAY_RATE"}
 BUS_LOSS = {"PCIE.LINK.DOWN": "sel", "GPU.BUS.LOST": "kernel"}
 
 

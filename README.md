@@ -20,7 +20,8 @@ When a whole fleet fails at once, the servers that died instantly could not writ
 Three roads lead to the same glyph:
 - **binary IPMI SEL records** (16 bytes) are decoded by sensor type, sensor number and event offset, following Intel's *SEL Troubleshooting Guide*, Rev. 3.8 (tables cited in the codebook);
 - **text SEL logs** in any dialect go through the lexicon (L1) and phrase rules (L2);
-- **Linux kernel logs** (v0.2: `dmesg -T` or `journalctl -o short-iso`) go through kernel rules: NVIDIA Xid and SXid, MCE, EDAC, PCIe AER, pciehp, kernel panic, lockups, OOM, thermal throttling, NIC link loss. Xid meanings follow NVIDIA's Xid catalog. Routine kernel chatter is ignored and counted.
+- **Linux kernel logs** (v0.2: `dmesg -T` or `journalctl -o short-iso`) go through kernel rules: NVIDIA Xid and SXid, MCE, EDAC, PCIe AER, pciehp, IOMMU/DMAR faults, GPU init failures, Fabric Manager failures, kernel panic, lockups, OOM, thermal throttling, NIC link loss. Xid meanings follow NVIDIA's Xid catalog. Routine kernel chatter is ignored and counted.
+- **GPU telemetry** (v0.2: DCGM samples in `dcgm.csv`) goes through metric rules: NVLink CRC rate, PCIe replay rate, row-remap failure and pending, spare-row banks, power and thermal violation time. Each metric is understood under both its dcgm-exporter name and its DCGM field name. This is the early-warning road: it fires before any Xid is written.
 
 Words the codebook does not know are not guessed: they surface as data gaps (`?word`) so the codebook can be extended.
 
@@ -86,6 +87,11 @@ Data gaps (Xid codes not in the codebook): {'xid=154': 2}
 - **Lemon nodes.** A server failing in several hardware categories (double-bit ECC, row remapping, host memory, PCIe) is drained as a whole, not fixed one symptom at a time.
 - **Escalation by rate.** A light triage repeated too often on one GPU (contained ECC errors, row remapping events: more than 3 in 24 h) is escalated to drain and diagnostics: the hardware is degrading.
 - **Practitioner triage.** The Xid triage was reviewed from operations experience: Xid 95 plans for a PCIe reset or reboot because a plain GPU reset often hangs; Xid 63 resets when idle but with a 12 h deadline; Xid 64 drains the node at once before RMA; Xid 13/31/43 return logs to the user instead of punishing the node.
+- **Early warnings from telemetry.** NVLink CRC errors at 300/min, PCIe replays, banks running out of spare rows, a GPU power-braked 60 % of the time: flagged before the hard error.
+- **Zombie GPUs.** Uncontained ECC or bus loss followed by a task blocked in the kernel (state D): soft restarts would hang, go straight to reboot or PCIe hot-plug reset.
+- **Silent cluster killers.** Fabric Manager failures (multi-node jobs hang at the first AllReduce with no Xid), IOMMU/DMAR faults (GPUDirect traffic stalls), AER storms (the host locks up writing logs), driver init failures after a reboot.
+- **Lagging signs.** Xid 45 with no earlier error on the same GPU: the root cause line was probably lost; run a health check.
+- **GSP errors (Xid 119/120)** are treated as driver-or-hardware: reset, then watch; repeated on one GPU escalates, many servers at once points to the driver.
 - **Unknown Xid codes are reported, not guessed.**
 - **Stable signatures.** A signature is the order in which concepts first appear, so two sources interleaving line by line still tell one story: the survivor is still found.
 
@@ -109,13 +115,14 @@ python -m glyphrca synth fleet_demo --bad 500 --ok 200      # writes a synthetic
 python -m glyphrca analyze fleet_demo                        # the report
 python -m glyphrca analyze fleet_demo --json report.json \
        --tier2-key "your-secret" --public public.json --private private_codebook.json
-python -m unittest discover -s tests -v                      # 27 tests
+python -m unittest discover -s tests -v                      # 30 tests
 ```
 
 ### Input layout
 ```
 <fleet>/<host>/sel.log     raw SEL: binary hex records and/or text, any dialect, mixed is fine
 <fleet>/<host>/kernel.log  optional: Linux kernel log, dmesg -T or journalctl -o short-iso
+<fleet>/<host>/dcgm.csv    optional: GPU telemetry, columns timestamp,gpu,field,value
 <fleet>/<host>/pcie.txt    optional: <BDF> <parent BDF|-> <kind> <slot> x<w>/x<max> gen<g>/gen<max>
 <fleet>/inventory.csv      optional: host,fw,bios,...
 ```
@@ -124,7 +131,8 @@ python -m unittest discover -s tests -v                      # 27 tests
 
 ```
 codebook/sel_v0.1.yaml   SEL codebook: concepts, binary SEL decoding, lexicon, phrase rules
-codebook/kernel_v0.2.yaml kernel codebook: GPU/NVLink/host concepts, Xid table, kernel rules
+codebook/kernel_v0.2.yaml kernel codebook: GPU/NVLink/host concepts, Xid table, kernel rules, escalation
+codebook/telemetry_v0.2.yaml telemetry codebook: DCGM metrics (exporter and field names), thresholds
 glyphrca/encode.py       L1, L2 (binary, text and kernel roads, template cache)
 glyphrca/fleet.py        L3 runs, L4 signatures, survivors, inventory join, simultaneity,
                          software-wide failures, lemon nodes
@@ -139,6 +147,7 @@ tests/                   unit and end-to-end tests
 ## Limits
 
 - The codebooks cover a core set of events. Real fleets need the full Intel tables, each vendor's OEM records and Windows Event Log (WHEA).
+- Thresholds (rates, escalation counts, storm sizes) are starting values from practice, to be tuned per fleet.
 - Kernel rules match the common message formats; drivers and kernel versions vary, and new formats surface as ignored lines or data gaps.
 - Synthetic scenarios are cleaner than reality: SEL overflow, BMC clock skew and truncated logs will create noise that v0.1 does not model.
 - Causality is inferred from topology and timing, not proven.
@@ -147,8 +156,13 @@ tests/                   unit and end-to-end tests
 
 - ~~v0.2 Linux kernel and NVIDIA Xid~~ (done)
 - v0.3 vendor codebooks: Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, full Intel tables, AMD
+- agent (beyond log analysis): job-aware blast radius (requeue the whole multi-node job through Slurm, Volcano or Ray, not just drain one node); NVLink state polling for degraded links; health-query watchdog for baseboard management hangs; ghost GPU contexts after container crashes; ingest of active diagnostics (DCGM diagnostics, NVIDIA field diagnostics) for silent data corruption
 - v0.4 Windows Event Log in several languages: one glyph whatever the language
 - later: rate-based states (a burst vs. a slow leak), interactive fleet view
+
+## Acknowledgements
+
+Triage notes and failure patterns in the kernel and telemetry codebooks come from the operational records of Vitali de Mille (data-centre and GPU fleet operations). Metric names and Xid meanings were checked against NVIDIA DCGM and Xid documentation.
 
 ## License
 

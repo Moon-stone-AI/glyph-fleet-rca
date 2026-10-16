@@ -141,7 +141,7 @@ def software_wide(events_by_host: dict[str, list[Event]], cb: Codebook, exclude:
         if h in exclude:
             continue
         for e in ev:
-            if cb.cause(e.concept) == "app_or_hw" and e.ts is not None:
+            if cb.cause(e.concept) in ("app_or_hw", "driver_or_hw") and e.ts is not None:
                 first[e.concept].setdefault(h, e.ts)
     out = []
     for concept, hosts in first.items():
@@ -181,6 +181,57 @@ def escalations(events_by_host: dict[str, list[Event]], cb: Codebook, window_s: 
             if peak > rules[concept]["max_per_day"]:
                 out.append((h, bdf, concept, peak, rules[concept]["to"]))
     return sorted(out)
+
+
+def _bdf(e: Event) -> str:
+    return next((a[4:] for a in e.args if a.startswith("bdf=")), "?")
+
+
+def zombie_gpus(events_by_host: dict[str, list[Event]], window_s: float = 1800.0):
+    """A GPU lost from the bus or hit by an uncontained ECC error, followed on the same server by a
+    task blocked in the kernel (state D): soft restarts will hang. Returns {host: (trigger, gpu)}."""
+    out = {}
+    for h, ev in events_by_host.items():
+        trig = [e for e in ev if e.concept in ("GPU.BUS.LOST", "GPU.MEM.ECC.UNCONTAINED") and e.ts is not None]
+        hung = [e.ts for e in ev if e.concept == "OS.HUNG_TASK" and e.ts is not None]
+        for t in trig:
+            if any(0 <= x - t.ts <= window_s for x in hung):
+                out[h] = (t.concept, _bdf(t))
+                break
+    return out
+
+
+def orphan_cleanups(events_by_host: dict[str, list[Event]], window_s: float = 600.0):
+    """Xid 45 (driver cleanup) with no earlier GPU error on the same GPU within the window:
+    the root cause was probably lost from the ring buffer. Returns [(host, gpu)]."""
+    out = []
+    for h, ev in events_by_host.items():
+        for i, e in enumerate(ev):
+            if e.concept != "GPU.DRIVER.CLEANUP" or e.ts is None:
+                continue
+            b = _bdf(e)
+            prior = any(p.concept.startswith(("GPU.", "LINK.")) and p.concept != "GPU.DRIVER.CLEANUP"
+                        and _bdf(p) == b and p.ts is not None and 0 <= e.ts - p.ts <= window_s for p in ev[:i])
+            if not prior:
+                out.append((h, b))
+    return sorted(set(out))
+
+
+def aer_storms(events_by_host: dict[str, list[Event]], cb: Codebook):
+    """Servers flooding the kernel log with PCIe AER messages: the host can lock up writing them,
+    and with it any agent that should fix it. Returns {host: peak messages per window}."""
+    cfg = cb.aer_storm or {"per_window": 1000, "window_s": 60}
+    out = {}
+    for h, ev in events_by_host.items():
+        ts = [e.ts for e in ev if e.source == "kernel" and e.concept.startswith("PCIE.") and e.ts is not None]
+        peak, j = 0, 0
+        for i in range(len(ts)):
+            while ts[i] - ts[j] > cfg["window_s"]:
+                j += 1
+            peak = max(peak, i - j + 1)
+        if peak >= cfg["per_window"]:
+            out[h] = peak
+    return out
 
 
 def lemon_nodes(fv: "FleetView", cb: Codebook, exclude: set[str], min_kinds: int = 3):
