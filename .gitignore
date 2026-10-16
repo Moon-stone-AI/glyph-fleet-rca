@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+fleet_*/
+*.json
+!codebook/*.json
+private_codebook*.json

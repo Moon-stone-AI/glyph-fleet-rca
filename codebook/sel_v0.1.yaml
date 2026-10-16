@@ -1,0 +1,96 @@
+# GlyphAI fleet-RCA codebook, SEL domain, v0.1
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# A concept glyph is a stable, vendor- and language-independent symbol for one class of event.
+# Two roads lead to the same glyph:
+#   1. binary SEL records (16-byte IPMI records)  -> decoded by sensor type / number / offset
+#   2. text logs in any vendor dialect            -> L1 word glyphs -> L2 phrase rules
+#
+# Binary mappings follow: Intel "System Event Log (SEL) Troubleshooting Guide for Intel Server Boards
+# based on 1st or 2nd Gen Intel Xeon Scalable Processors", Rev. 3.8, April 2022
+# (tables cited per entry). Other vendors' OEM records need their own entries.
+
+version: "0.1.0"
+
+concepts:
+  SYS.BOOT:          {severity: info, triage: observe,        desc: "System boot / POST complete"}
+  THERMAL.OK:        {severity: info, triage: observe,        desc: "Temperature back within range"}
+  THERMAL.CRIT:      {severity: crit, triage: check_cooling,  desc: "Temperature crossed a critical threshold"}
+  MEM.ECC.CORR:      {severity: warn, triage: watch_rate,     desc: "Correctable memory ECC error (rate matters)"}
+  MEM.ECC.UNCORR:    {severity: crit, fatal: true, triage: replace_dimm,   desc: "Uncorrectable memory ECC error"}
+  PCIE.CORR:         {severity: warn, triage: watch_rate,     desc: "PCIe correctable error"}
+  PCIE.FATAL:        {severity: crit, triage: check_link,     desc: "PCIe fatal error"}
+  PCIE.LINK.DOWN:    {severity: crit, triage: check_link,     desc: "PCIe surprise link down (device fell off the bus)"}
+  NET.LINK.DOWN:     {severity: warn, triage: check_fabric,   desc: "Network link lost"}
+  CPU.IERR.CATERR:   {severity: crit, fatal: true, triage: look_upstream,  desc: "CPU internal / catastrophic error (often caused elsewhere)"}
+  CPU.THERMTRIP:     {severity: crit, fatal: true, triage: check_cooling,  desc: "CPU thermal trip"}
+  PSU.FAIL:          {severity: crit, fatal: true, triage: replace_psu,    desc: "Power supply failure"}
+  OS.KERNEL.PANIC:   {severity: crit, fatal: true, triage: read_last_words, desc: "Operating system critical stop / kernel panic"}
+
+# ---------------------------------------------------------------- road 1: binary SEL
+# key: st = sensor type, sn = sensor number (null = any), offset (ED1[3:0], null = any); args: decoder name
+sel_binary:
+  - {st: 0x07, sn: 0x80, offset: null, concept: CPU.IERR.CATERR, args: cpu_bitmap,  ref: "Tables 61-62"}
+  - {st: 0x07, sn: null, offset: 0x1,  concept: CPU.THERMTRIP,   args: none,        ref: "Table 60"}
+  - {st: 0x0C, sn: 0x02, offset: 0x0,  concept: MEM.ECC.CORR,    args: mem_location, ref: "Tables 75, 77"}
+  - {st: 0x0C, sn: 0x02, offset: 0x1,  concept: MEM.ECC.UNCORR,  args: mem_location, ref: "Tables 75, 77"}
+  - {st: 0x13, sn: 0x04, offset: 0x1,  concept: PCIE.LINK.DOWN,  args: pcie_bdf,    ref: "Table 83 (Surprise Link Down)"}
+  - {st: 0x13, sn: 0x04, offset: null, concept: PCIE.FATAL,      args: pcie_bdf,    ref: "Table 83"}
+  - {st: 0x13, sn: 0x05, offset: null, concept: PCIE.CORR,       args: pcie_bdf,    ref: "Table 85"}
+  - {st: 0x20, sn: null, offset: 0x1,  concept: OS.KERNEL.PANIC, args: none,        ref: "Table 136 (GID 0021h)"}
+  - {st: 0x08, sn: null, offset: 0x1,  concept: PSU.FAIL,        args: none,        ref: "IPMI sensor type 08h offset 1"}
+  - {st: 0x01, sn: null, offset: null, concept: THERMAL.CRIT,    args: none,        ref: "Threshold temperature sensors"}
+
+# ---------------------------------------------------------------- road 2: text dialects
+# L1: word -> word glyph. Anything not listed (and not a stop word) surfaces as "?word" = a data gap.
+lexicon:
+  MEM: [memory, mem, dimm, module]
+  CORR: [correctable, corrected]
+  UNCORR: [uncorrectable, multi-bit]
+  ECC: [ecc]
+  ERR: [error, err, errors]
+  PCIE: [pci, pcie, express, bus]
+  NET: [lan, nic, network, adapter]
+  LINK: [link, connection]
+  DOWN: [down, lost]
+  SURPRISE: [surprise]
+  CPU: [cpu, processor]
+  IERR: [ierr, internal, caterr]
+  MCE: [machine, check, exception]
+  OS: [os, operating, system]
+  STOP: [stop, halted, shutdown, failure]
+  PANIC: [panic]
+  BOOT: [boot, post, bios]
+  DONE: [initiated, complete, restored]
+  TEMP: [temperature, inlet]
+  OK: [normal, range, ok, deasserted]
+  HIGH: [high]
+  NONCRIT: [non-critical]
+  CRIT: [critical]
+  WARN: [warning, caution]
+  INFO: [info]
+  THRESH: [threshold, exceeded, rate]
+  FATAL: [fatal]
+  KERNEL: [kernel]
+  PSU: [supply, psu]
+  POWER: [power, server]
+  THERMTRIP: [thermtrip, trip]
+  META: [record, date, time, severity, description, interrupt, asserted, sensor, slot, segment, port, bank, status, event, socket, channel, device, component]
+
+stop_words: ["a", "an", "the", "of", "on", "for", "was", "has", "have", "is", "during", "occurred", "detected", "within", "run", "going", "upper", "not", "syncing", "integrated", "at"]
+
+# L2: ordered rules; first rule whose word-glyph set is contained in the line wins.
+phrases:
+  - {concept: OS.KERNEL.PANIC, any_of: [[PANIC], [OS, STOP]]}
+  - {concept: CPU.THERMTRIP,   any_of: [[CPU, THERMTRIP]]}
+  - {concept: CPU.IERR.CATERR, any_of: [[CPU, IERR], [UNCORR, MCE], [IERR]]}
+  - {concept: MEM.ECC.UNCORR,  any_of: [[MEM, UNCORR]]}
+  - {concept: MEM.ECC.CORR,    any_of: [[MEM, CORR]]}
+  - {concept: PCIE.LINK.DOWN,  any_of: [[PCIE, SURPRISE, LINK, DOWN], [PCIE, FATAL, LINK, DOWN]]}
+  - {concept: PCIE.FATAL,      any_of: [[PCIE, FATAL]]}
+  - {concept: PCIE.CORR,       any_of: [[PCIE, CORR]]}
+  - {concept: NET.LINK.DOWN,   any_of: [[NET, DOWN], [LINK, DOWN]]}
+  - {concept: PSU.FAIL,        any_of: [[POWER, PSU, STOP], [PSU, STOP]]}
+  - {concept: THERMAL.CRIT,    any_of: [[TEMP, CRIT, HIGH]]}
+  - {concept: THERMAL.OK,      any_of: [[TEMP, OK], [TEMP, NONCRIT]]}
+  - {concept: SYS.BOOT,        any_of: [[BOOT]]}
