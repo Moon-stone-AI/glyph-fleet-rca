@@ -58,6 +58,22 @@ class GpuHealth(unittest.TestCase):
         for h in self.truth["gsp_repeat"]:  # 2 x Xid 119
             self.assertEqual(self.worst(h)["breakdown"]["severe_xid"], 16)
 
+    def test_uncorrectable_memory_caps(self):
+        for h in self.truth["lemons"]:  # one Xid 48 on GPU2
+            c = [c for c in self.by_host[h] if c["evidence"].get("GPU.MEM.ECC.DBE")]
+            self.assertTrue(c)
+            self.assertLessEqual(c[0]["score"], 74)
+            self.assertEqual(c[0]["band"], "caution")
+        from glyphrca.health import gpu_health
+        from glyphrca.encode import Event
+        gpus = {("h", "0000:41:00.0"): {"host": "h", "bdf": "0000:41:00.0", "hours": ""}}
+        ev = lambda c, t: Event(t, c, ("bdf=0000:41:00.0",), (), "")  # noqa: E731
+        one = gpu_health({"h": [ev("GPU.MEM.ECC.DBE", 1), ev("GPU.MEM.REMAP.EVENT", 2)]}, {}, gpus, set())[0]
+        self.assertEqual((one["score"], one["band"]), (74, "caution"))  # 48 + its remap = one incident
+        two = gpu_health({"h": [ev("GPU.MEM.ECC.DBE", 1), ev("GPU.MEM.ECC.DBE", 9)]}, {}, gpus, set())[0]
+        self.assertEqual(two["band"], "do not sell")
+        self.assertLessEqual(two["score"], 49)
+
     def test_quiet_gpu_loses_only_age(self):
         quiet = [c for c in self.cards if set(c["breakdown"]) <= {"age"} and not c["verdicts"]]
         self.assertGreater(len(quiet), 3000)

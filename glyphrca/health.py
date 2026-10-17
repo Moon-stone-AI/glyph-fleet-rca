@@ -101,6 +101,18 @@ def gpu_health(events_by_host: dict[str, list[Event]], trees: dict, gpus: dict |
                 if score > cap["max_score"]:
                     score = cap["max_score"]
                 verdicts.append(cap["verdict"])
+        # group caps: one memory incident often writes Xid 48 and Xid 63 together, so the group counts
+        # the largest single concept, not the sum; the strictest step reached wins
+        for g in cfg.get("group_caps", []):
+            n = max((counts.get(c, 0) for c in g["concepts"]), default=0)
+            hit = [s for s in g["steps"] if n >= s["min_count"]]
+            if hit:
+                s = min(hit, key=lambda s: s["max_score"])
+                score = min(score, s["max_score"])
+                verdicts.append(s["verdict"])
+                for c in g["concepts"]:
+                    if counts.get(c):
+                        evidence[c] = counts[c]
         score = round(max(0.0, score), 1)
         cards.append({"host": key[0], "bdf": key[1], "uuid": meta.get("uuid", ""), "model": meta.get("model", "unknown"),
                       "hours": hours, "score": score, "band": band(score, cfg), "breakdown": breakdown,

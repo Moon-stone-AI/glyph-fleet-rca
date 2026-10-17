@@ -53,6 +53,16 @@ caps:
   GPU.SDC:                 {max_score: 10, verdict: "RMA, not for sale: failed matrix-math diagnostic"}
   GPU.MEM.REMAP.NO_SPARE:  {max_score: 30, verdict: "memory banks with no spare rows left"}
 
+# group caps (Vitali de Mille, 17 Oct 2026): an uncorrectable memory error drops the card to "caution"
+# at once; a repeat sends it to "do not sell". Xid 48 and the row remap it triggers are one incident,
+# so the group counts the largest concept count, not the sum.
+group_caps:
+  - name: uncorrectable_memory
+    concepts: [GPU.MEM.ECC.DBE, GPU.MEM.REMAP.EVENT]
+    steps:
+      - {min_count: 1, max_score: 74, verdict: "uncorrectable memory error (Xid 48 or row remap): sell only with disclosure"}
+      - {min_count: 2, max_score: 49, verdict: "repeated uncorrectable memory errors: not for sale"}
+
 bands:
   - {min: 90, label: excellent}
   - {min: 75, label: good}

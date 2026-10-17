@@ -110,6 +110,7 @@ GPU health index (0-100 %, from each GPU's own history; not a survival probabili
 
 - Six components with ceilings: GPU memory 35, severe Xid 25, links 15, throttling 10, diagnostics 10, age 5.
 - Hard caps: exhausted row remapping or a failed matrix-math test caps the GPU at 10 %; banks with no spare rows at 30 %.
+- Uncorrectable memory: one Xid 48 or row remap caps the GPU at 74 % (caution); a repeat caps it at 49 % (do not sell). Xid 48 and the remap it triggers count as one incident.
 - Every score shows its deductions; weights live in `codebook/health_v0.2.1.yaml`.
 - The index describes the past. It is not a probability of survival: that would need real failure data.
 - PCIe floods during a common-mode crash are not charged to the GPUs.
