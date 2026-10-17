@@ -20,7 +20,8 @@ import yaml
 CODEBOOK_DIR = Path(__file__).resolve().parent.parent / "codebook"
 DEFAULT_CODEBOOK = CODEBOOK_DIR / "sel_v0.1.yaml"
 DEFAULT_CODEBOOKS = (CODEBOOK_DIR / "sel_v0.1.yaml", CODEBOOK_DIR / "kernel_v0.2.yaml",
-                     CODEBOOK_DIR / "telemetry_v0.2.yaml", CODEBOOK_DIR / "diag_v0.2.yaml")
+                     CODEBOOK_DIR / "telemetry_v0.2.yaml", CODEBOOK_DIR / "diag_v0.2.yaml",
+                     CODEBOOK_DIR / "vendor_dell_v0.3.yaml")
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class Codebook:
     metrics: dict = field(default_factory=dict)   # metric name (exporter or DCGM field) -> rule
     aer_storm: dict = field(default_factory=dict)
     diag: dict = field(default_factory=dict)
+    message_ids: dict = field(default_factory=dict)  # vendor message ID (e.g. Dell MEM0001) -> rule
 
     @classmethod
     def load(cls, paths=DEFAULT_CODEBOOKS) -> "Codebook":
@@ -68,6 +70,7 @@ class Codebook:
             cb.escalation += d.get("escalation", [])
             cb.aer_storm.update(d.get("aer_storm", {}))
             cb.diag.update(d.get("diag", {}))
+            cb.message_ids.update(d.get("message_ids", {}))
             for m in d.get("metrics", []):
                 for n in m["names"]:
                     cb.metrics[n] = m
@@ -112,6 +115,8 @@ BDF = re.compile(r"\b([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])\b", re.I)
 WORD = re.compile(r"[a-z]+(?:-[a-z]+)*")
 EDAC_LOC = re.compile(r"(CPU_SrcID#\d+_MC#\d+_Chan#\d+_DIMM#\d+)")
 CPU_ARG = re.compile(r"\bCPU (\d+)\b")
+MSG_ID = re.compile(r"\b([A-Z]{2,4}\d{2,4})\b")          # vendor message IDs: Dell MEM0001, NIC100, PDR16
+BUS_DEV_FN = re.compile(r"\bbus (\d+) device (\d+) function (\d+)", re.I)   # Dell text form
 ARG_NAME = {"processor": "cpu", "module": "dimm"}
 
 
@@ -134,6 +139,8 @@ def parse_ts(line: str) -> float | None:
 def text_args(line: str) -> tuple[str, ...]:
     args = [f"{ARG_NAME.get(k.lower(), k.lower())}={v.upper()}" for k, v in SEM_ARG.findall(line)]
     args += [f"bdf={b.lower()}" for b in BDF.findall(line)]
+    # Dell prints "bus 2 device 0 function 0"; kept as written: whether the numbers are decimal is not confirmed
+    args += [f"pci=bus{b}.dev{d}.fn{f}" for b, d, f in BUS_DEV_FN.findall(line)]
     return tuple(args)
 
 
@@ -278,6 +285,10 @@ class Encoder:
     def encode(self, line: str) -> Event:
         if HEX_RECORD.match(line):
             return self.decode_binary(line)
+        for mid in MSG_ID.findall(line):
+            rule = self.cb.message_ids.get(mid)
+            if rule:
+                return Event(parse_ts(line), rule["concept"], (f"msg={mid}",) + text_args(line), (), line.rstrip("\n"))
         key = VARIABLE.sub("#", line)
         hit = self._cache.get(key)
         if hit is None:
