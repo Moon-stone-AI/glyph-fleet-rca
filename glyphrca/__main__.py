@@ -28,6 +28,7 @@ def main(argv=None):
     a.add_argument("fleet")
     a.add_argument("--json")
     a.add_argument("--health-csv", help="write one row per GPU with its health index")
+    a.add_argument("--buckets-csv", help="write the work queues: one row per faulty node, by symptom bucket")
     a.add_argument("--tier2-key")
     a.add_argument("--public", default="public_report.json")
     a.add_argument("--private", default="private_codebook.json")
@@ -43,6 +44,10 @@ def main(argv=None):
         from .health import write_csv
         write_csv(r["gpu_health"], args.health_csv)
         print(f"\nGPU health cards -> {args.health_csv}")
+    if args.buckets_csv and r.get("buckets"):
+        from .buckets import write_csv as write_buckets
+        write_buckets(r["buckets"], args.buckets_csv)
+        print(f"Work queues -> {args.buckets_csv}")
     if args.json:
         json.dump(r, open(args.json, "w"), indent=1)
     if args.tier2_key:

@@ -1,0 +1,48 @@
+# GlyphAI fleet-RCA: symptom buckets, v0.4
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# Faulty nodes are sorted into work queues by their main symptom, so a shift gets queues, not log lines.
+# A node goes to the FIRST bucket (highest priority) that matches any of its warning or critical concepts;
+# its other matching buckets are listed beside it, so one server never sits in three queues.
+# Two buckets come from fleet findings, not from concepts: common_mode (a fleet-wide crash with one cause)
+# and software (application or driver errors on many servers at once).
+# 'match' entries are concept prefixes: "GPU.MEM." matches GPU.MEM.ECC.DBE, GPU.MEM.REMAP.FAIL, ...
+
+version: "0.4.0"
+
+buckets:
+  - {name: common_mode,   label: "Fleet-wide crash, one common cause", owner: engineering,
+     action: "Fix the common cause once (see the inventory verdict); do not service these nodes one by one"}
+  - {name: gpu_sdc,       label: "GPU failed diagnostics (possible silent data corruption)", owner: technician,
+     action: "Drain and keep out of any cluster; RMA", match: [GPU.SDC, GPU.DIAG.FAIL]}
+  - {name: gpu_off_bus,   label: "GPU off the bus or failed to start", owner: technician,
+     action: "Reseat or replace the GPU; check slot and riser; RMA if it repeats",
+     match: [GPU.BUS.LOST, GPU.INIT.FAIL, GPU.MISSING]}
+  - {name: gpu_memory,    label: "GPU memory (ECC, row remapping, spare rows)", owner: technician,
+     action: "Drain; reset when idle; plan RMA when spare rows run out", match: [GPU.MEM.]}
+  - {name: gpu_severe,    label: "GPU firmware or controller faults (GSP, micro-controller)", owner: engineer,
+     action: "Reset the GPU and watch; a repeat on one GPU escalates, many servers at once points to the driver",
+     match: [GPU.CTRL., GPU.UCODE., GPU.BASEBOARD.]}
+  - {name: nvlink_fabric, label: "NVLink, NVSwitch and Fabric Manager", owner: engineer,
+     action: "Check NVLink and NVSwitch state; restart Fabric Manager; run diagnostics",
+     match: [LINK.NVLINK., LINK.NVSWITCH., FABRIC.]}
+  - {name: pcie_riser,    label: "PCIe links, switches and risers", owner: technician,
+     action: "Check the switch or riser first when several devices behind it report; reseat cables",
+     match: [PCIE., LINK.DEGRADED]}
+  - {name: cpu,           label: "Processor", owner: technician,
+     action: "Read the last words; check firmware before swapping the CPU", match: [CPU.]}
+  - {name: host_memory,   label: "Host memory (DIMM)", owner: technician,
+     action: "Replace the DIMM named in the event", match: [MEM.]}
+  - {name: power,         label: "Power supplies and power limits", owner: technician,
+     action: "Check feeds, PDUs and PSUs", match: [PSU., VOLT., POWER., GPU.POWER.]}
+  - {name: thermal,       label: "Cooling and thermal", owner: technician,
+     action: "Check fans, airflow and liquid cooling", match: [THERMAL., GPU.THERMAL., FAN., COOLING.]}
+  - {name: network,       label: "Network links", owner: technician,
+     action: "Check optics, cables and switch ports", match: [NET.]}
+  - {name: storage,       label: "Drives", owner: technician, action: "Replace failed or failing drives", match: [DISK.]}
+  - {name: os,            label: "OS crash or hang", owner: engineer,
+     action: "Read the last words; collect the crash dump", match: [OS.]}
+  - {name: software,      label: "Application or driver errors on many servers at once", owner: user,
+     action: "Return the logs to the job owner; do not touch the hardware"}
+  - {name: unknown,       label: "Unknown codes (data gaps)", owner: engineer,
+     action: "Look up the code; add it to the codebook", match: [GPU.XID.OTHER, UNKNOWN]}

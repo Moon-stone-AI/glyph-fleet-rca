@@ -18,7 +18,7 @@ import zlib
 from collections import Counter
 from pathlib import Path
 
-from . import health, pcie
+from . import buckets, health, pcie
 from .encode import Codebook, Encoder
 from .fleet import (build_fleet, crashed, escalations, inventory_join, lemon_nodes, load_inventory,
                     orphan_cleanups, simultaneity, software_wide, zombie_gpus, aer_storms)
@@ -111,6 +111,12 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
     gpus = health.load_gpus(fleet_dir / "gpus.csv") if (fleet_dir / "gpus.csv").exists() else None
     cards = health.gpu_health(events, trees, gpus, common_mode) if (gpus or trees) else []
     fabric = sorted(h for h, ev in events.items() if any(e.concept == "FABRIC.MANAGER.DOWN" for e in ev))
+    sw_hosts: dict[str, set[str]] = {}
+    for c, hs, _a, _b, _o in sw:
+        for h in hs:
+            sw_hosts.setdefault(h, set()).add(c)
+    missing_gpu = {h for p_, hs in (topo.missing.items() if topo else []) if "GPU" in p_ for h in hs}
+    queues = buckets.bucketize(events, cb, common_mode, sw_hosts, set(lemons), missing_gpu)
     gpu_unknown = Counter(a for ev in events.values() for e in ev if e.concept == "GPU.XID.OTHER"
                           for a in e.args if a.startswith("xid="))
     elapsed = time.perf_counter() - t0
@@ -154,6 +160,7 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
         "iommu_faults": iommu,
         "gpu_init_failures": init_fail,
         "gpu_health": cards,
+        "buckets": queues,
         "gpu_health_by_model": health.fleet_stats(cards) if cards else {},
         "triage": {c: {"triage": cb.triage(c), "note": cb.concepts.get(c, {}).get("note", "")}
                    for c in sorted({e.concept for ev in events.values() for e in ev}) if c in cb.concepts},
@@ -260,6 +267,14 @@ def render_text(r: dict) -> str:
             parts = " · ".join(f"{k} -{v:g}" for k, v in c["breakdown"].items())
             out.append(f"    {c['score']:>5} %  {c['band']:<11} {c['model']:<6} {c['host']} {c['bdf']}  {parts}"
                        + (f"  [{'; '.join(c['verdicts'])}]" if c["verdicts"] else ""))
+    if r.get("buckets"):
+        out.append("\nWork queues by symptom (each faulty node in one queue; lemons first, then most critical):")
+        for q in r["buckets"]:
+            first = ", ".join(n["host"] + ("*" if n["lemon"] else "") for n in q["nodes"][:4])
+            more = f" +{len(q['nodes']) - 4}" if len(q["nodes"]) > 4 else ""
+            out.append(f"  {len(q['nodes']):>5}  {q['label']:<58} [{q['owner']}] {first}{more}")
+            out.append(f"         -> {q['action']}")
+        out.append("  (* lemon node)")
     if r.get("escalations"):
         out.append("\nEscalations (a light triage repeated too often on one GPU):")
         for e in r["escalations"]:
