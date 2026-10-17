@@ -3,6 +3,8 @@
 #
 # Source for every ID and text: Lenovo, "ThinkSystem SR650 V4 Messages and Codes Reference" (2026),
 # chapters 2 (XClarity Controller events, FQXSP...) and 3 (UEFI events, FQXSF...). 692 IDs in the guide.
+# Entries marked guide: sr680a_sr780a_v3 come from the "ThinkSystem SR680a V3" and "SR780a V3 Messages and
+# Codes Reference" guides (772 and 790 IDs), Lenovo's HGX GPU servers.
 # 'text' is the guide's message string ([arg1] etc. are its placeholders); 'lenovo_severity' is its Severity.
 # The concept is the GlyphAI reading of that message.
 #
@@ -11,9 +13,16 @@
 #   which the encoder turns into a bdf.
 # - "Uncorrected recoverable" memory errors (FQXSFMA0056M, 0082M, 0083M) are not mapped: they are not
 #   the fatal uncorrectable error and need their own concept first.
-# - The SR650 V4 guide has no GPU-specific events; GPU servers (SR680a, SR780a) need their own guides.
+# - GPU events in the SR680a/SR780a V3 guides are few and coarse: board status changes and total graphics power
+#   over its limit. Per-GPU faults (Xid, ECC, NVLink) are not in the XCC log; they come from the kernel and DCGM roads.
 
 version: "0.3.0-lenovo"
+
+concepts:
+  GPU.POWER.OVER_LIMIT: {severity: warn, cause: platform, triage: check_power_capping,
+                         desc: "Total graphics power exceeded the configured limit"}
+  GPU.BOARD.STATUS:     {severity: warn, cause: hardware, triage: check_gpu_board,
+                         desc: "GPU board status changed (XCC); read the board's own logs"}
 
 message_ids:
   FQXSPCA0002M: {concept: FAN.FAIL, lenovo_severity: Error, text: "Fan [NumericSensorName] going low (lower critical) has asserted."}
@@ -65,3 +74,21 @@ message_ids:
   FQXSFPU0018N: {concept: CPU.IERR.CATERR, lenovo_severity: Error, text: "CATERR(IERR) has asserted on processor [arg1]. This is reported when FEH detects CPU IERR."}
   FQXSFPU0019N: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, text: "An uncorrectable error has been detected on processor [arg1]. This is reported when FEH detects CPU MCERR."}
   FQXSFPU0027N: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, text: "System uncorrectable error has occurred on Processor [arg1] Core [arg2] MC bank [arg3] with MC Status [arg4], MC Address [arg5], and MC Misc [arg6]."}
+  FQXSPPU0003N: {concept: CPU.IERR.CATERR, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "[ProcessorElementName] has Failed with IERR."}
+  FQXSPPU0012M: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "[ProcessorElementName] has machine check error."}
+  FQXSPPU0011N: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "An SM BIOS Uncorrectable CPU complex error for [ProcessorElementName] has asserted."}
+  FQXSPPU0004M: {concept: CPU.INIT.FAIL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "[ProcessorElementName] has Failed with FRB1/BIST condition."}
+  FQXSPMA0008N: {concept: MEM.ECC.UNCORR, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "Uncorrectable error detected for [PhysicalMemoryElementName] on Subsystem [MemoryElementName]."}
+  FQXSPMA0001I: {concept: MEM.ECC.CORR, lenovo_severity: Warning, guide: sr680a_sr780a_v3, text: "Error Detected and Corrected for [PhysicalMemoryElementName] on Subsystem [MemoryElementName]."}
+  FQXSPMA0011G: {concept: MEM.ECC.CORR_LIMIT, lenovo_severity: Warning, guide: sr680a_sr780a_v3, text: "Memory Logging Limit Reached for [PhysicalMemoryElementName] on Subsystem [MemoryElementName]."}
+  FQXSPMA0034M: {concept: MEM.DIMM.FAIL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "System had DIMM PMIC power fault, DIMM need to replace, NO virtual reseat function."}
+  FQXSPIO0007N: {concept: PCIE.FATAL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "A PCI PERR has occurred on system [ComputerSystemElementName]."}
+  FQXSPIO0008N: {concept: PCIE.FATAL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "A PCI SERR has occurred on system [ComputerSystemElementName]."}
+  FQXSPIO0015M: {concept: PCIE.FATAL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "Fault in slot [PhysicalConnectorSystemElementName] on system [ComputerSystemElementName]."}
+  FQXSFIO0010M: {concept: PCIE.UNCORR.NONFATAL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "An Uncorrectable PCIe Error has Occurred at Bus [arg1] Device [arg2] Function [arg3]. The Vendor ID for the device is [arg4] and the Device ID is [arg5]. The physical [arg6] number is [arg7]."}
+  FQXSFIO0011M: {concept: PCIE.FATAL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "A PCIe parity error has occurred on Bus [arg1] Device [arg2] Function [arg3]. The Vendor ID for the device is [arg4] and the Device ID is [arg5]. The Physical slot number is [arg6]."}
+  FQXSFIO0012M: {concept: PCIE.FATAL, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "A PCIe system error has occurred on Bus [arg1] Device [arg2] Function [arg3]. The Vendor ID for the device is [arg4] and the Device ID is [arg5]. The Physical slot number is [arg6]."}
+  FQXSFMA0062M: {concept: MEM.ECC.UNCORR, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "An uncorrectable memory error occurred on CPU [arg1] high-bandwidth memory (HBM) channel [arg2] pseudo-channel [arg3]."}
+  FQXSFPU0042M: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, guide: sr680a_sr780a_v3, text: "System uncorrected error(Write Data Buffer) happened in Processor [arg1] iMC [arg2] with MC Status [arg3], MC Address [arg4], and MC Misc [arg5]."}
+  FQXSPPW4002I: {concept: GPU.POWER.OVER_LIMIT, lenovo_severity: Warning, guide: sr680a_sr780a_v3, text: "Total graphics power value has exceeded the pre-configured limit."}
+  FQXSPIO4001I: {concept: GPU.BOARD.STATUS, lenovo_severity: Warning, guide: sr680a_sr780a_v3, text: "GPU Board Status was changed by [arg1] of [arg1]."}

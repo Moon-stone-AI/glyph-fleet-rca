@@ -18,7 +18,7 @@ T = "2026-10-13T14:00:01 "
 class LenovoEventIds(unittest.TestCase):
     def test_every_lenovo_id_is_sourced(self):
         ids = [k for k in CB.message_ids if k.startswith("FQX")]
-        self.assertGreaterEqual(len(ids), 45)
+        self.assertGreaterEqual(len(ids), 60)
         for k in ids:
             with self.subTest(k=k):
                 r = CB.message_ids[k]
