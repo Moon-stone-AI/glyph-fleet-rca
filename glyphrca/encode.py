@@ -21,7 +21,8 @@ CODEBOOK_DIR = Path(__file__).resolve().parent.parent / "codebook"
 DEFAULT_CODEBOOK = CODEBOOK_DIR / "sel_v0.1.yaml"
 DEFAULT_CODEBOOKS = (CODEBOOK_DIR / "sel_v0.1.yaml", CODEBOOK_DIR / "kernel_v0.2.yaml",
                      CODEBOOK_DIR / "telemetry_v0.2.yaml", CODEBOOK_DIR / "diag_v0.2.yaml",
-                     CODEBOOK_DIR / "vendor_dell_v0.3.yaml")
+                     CODEBOOK_DIR / "vendor_common_v0.3.yaml", CODEBOOK_DIR / "vendor_dell_v0.3.yaml",
+                     CODEBOOK_DIR / "vendor_lenovo_v0.3.yaml")
 
 
 @dataclass(frozen=True)
@@ -115,9 +116,9 @@ BDF = re.compile(r"\b([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])\b", re.I)
 WORD = re.compile(r"[a-z]+(?:-[a-z]+)*")
 EDAC_LOC = re.compile(r"(CPU_SrcID#\d+_MC#\d+_Chan#\d+_DIMM#\d+)")
 CPU_ARG = re.compile(r"\bCPU (\d+)\b")
-MSG_ID = re.compile(r"\b([A-Z]{2,4}\d{2,4})\b")          # vendor message IDs: Dell MEM0001, NIC100, PDR16
+MSG_ID = re.compile(r"\b(FQX[A-Z]{2,6}\d{4}[A-Z]|[A-Z]{2,4}\d{2,4})\b")  # vendor IDs: Dell MEM0001, PDR16; Lenovo FQXSPIO0013N
 BUS_DEV_FN = re.compile(r"\bbus (\d+) device (\d+) function (\d+)", re.I)   # Dell text form
-HEX_BDF = re.compile(r"\bBus:\s*0x([0-9a-f]{1,2})\s+Dev:\s*0x([0-9a-f]{1,2})\s+F(?:unc)?:\s*0x([0-7])", re.I)  # explicit hex
+HEX_BDF = re.compile(r"\bBus:?\s*0x([0-9a-f]{1,2})\s+Dev(?:ice)?:?\s*0x([0-9a-f]{1,2})\s+F(?:unc(?:tion)?)?:?\s*0x([0-7])", re.I)  # explicit hex (Dell-style, Lenovo UEFI)
 GPU_IDX = re.compile(r"\bGPU[_ ](\d+)\b|\bGPU\)? device (\d+)\b", re.I)                   # iDRAC: GPU_3, GPU device 2
 ARG_NAME = {"processor": "cpu", "module": "dimm"}
 

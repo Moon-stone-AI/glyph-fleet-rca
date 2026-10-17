@@ -1,0 +1,67 @@
+# GlyphAI fleet-RCA codebook, vendor domain: Lenovo ThinkSystem XClarity Controller (XCC) and UEFI events, v0.3
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# Source for every ID and text: Lenovo, "ThinkSystem SR650 V4 Messages and Codes Reference" (2026),
+# chapters 2 (XClarity Controller events, FQXSP...) and 3 (UEFI events, FQXSF...). 692 IDs in the guide.
+# 'text' is the guide's message string ([arg1] etc. are its placeholders); 'lenovo_severity' is its Severity.
+# The concept is the GlyphAI reading of that message.
+#
+# Notes from checking the guide:
+# - UEFI PCIe events give the address as explicit hex ("Segment 0x0 Bus 0x41 Device 0x00 Function 0x0"),
+#   which the encoder turns into a bdf.
+# - "Uncorrected recoverable" memory errors (FQXSFMA0056M, 0082M, 0083M) are not mapped: they are not
+#   the fatal uncorrectable error and need their own concept first.
+# - The SR650 V4 guide has no GPU-specific events; GPU servers (SR680a, SR780a) need their own guides.
+
+version: "0.3.0-lenovo"
+
+message_ids:
+  FQXSPCA0002M: {concept: FAN.FAIL, lenovo_severity: Error, text: "Fan [NumericSensorName] going low (lower critical) has asserted."}
+  FQXSPCA0009M: {concept: THERMAL.OUT_OF_RANGE, lenovo_severity: Error, text: "Ambient temperature going high (upper critical) has asserted."}
+  FQXSPCA0011N: {concept: THERMAL.CRIT, lenovo_severity: Error, text: "Ambient temperature going high (upper non-recoverable) has asserted."}
+  FQXSPCA0017M: {concept: THERMAL.OUT_OF_RANGE, lenovo_severity: Error, text: "PCIe [SensorName] overtemperature has transitioned to critical from a less severe state."}
+  FQXSPCA0019N: {concept: THERMAL.CRIT, lenovo_severity: Error, text: "PCIe [SensorName] overtemperature has transitioned to non-recoverable from a less severe state."}
+  FQXSPCA0040N: {concept: COOLING.LEAK, lenovo_severity: Error, text: "Liquid is leaking from open loop [CoolingSensorName]."}
+  FQXSPCA0041N: {concept: COOLING.LEAK, lenovo_severity: Error, text: "Liquid is leaking from closed loop [CoolingSensorName]."}
+  FQXSPIO0004L: {concept: PCIE.TIMEOUT, lenovo_severity: Error, text: "A bus timeout has occurred on bus [BusName]."}
+  FQXSPIO0010I: {concept: PCIE.CORR, lenovo_severity: Info, text: "A Correctable Bus Error has occurred on bus [BusName]."}
+  FQXSPIO0011N: {concept: PCIE.UNCORR.NONFATAL, lenovo_severity: Error, text: "An Uncorrectable Error has occurred on PCIs."}
+  FQXSPIO0013N: {concept: PCIE.FATAL, lenovo_severity: Error, text: "A Fatal Bus Error has occurred on bus [BusName]."}
+  FQXSPIO0014J: {concept: LINK.DEGRADED, lenovo_severity: Warning, text: "Bus [BusName] is operating in a degraded state."}
+  FQXSPEA0003J: {concept: NET.LINK.DOWN, lenovo_severity: Warning, text: "Link down is detected on port [PCIPortNumber] of the PCIe device [PCIDeviceName]."}
+  FQXSPPU0001N: {concept: CPU.THERMTRIP, lenovo_severity: Error, text: "An Over-Temperature Condition has been detected on Processor [ProcessorId]."}
+  FQXSPPU0016N: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, text: "An Uncorrectable Error has occurred on CPUs."}
+  FQXSPPU0017N: {concept: CPU.IERR.CATERR, lenovo_severity: Error, text: "A hard fault has occurred on processor [ProcessorId]."}
+  FQXSPPW0002L: {concept: PSU.FAIL, lenovo_severity: Error, text: "Power supply [PowerSupplyId] has Failed."}
+  FQXSPPW0003L: {concept: PSU.FAIL, lenovo_severity: Error, text: "Power supply [PowerSupplyId] in the enclosure/chassis (MTM-S/N: [MachineSerialNumber]) has failed."}
+  FQXSPPW0061M: {concept: PSU.FAIL, lenovo_severity: Error, text: "PSU [SensorName] failure has transitioned to critical from a less severe state."}
+  FQXSPPW0003G: {concept: PSU.PREDICTIVE_FAIL, lenovo_severity: Warning, text: "Failure predicted on power supply [PowerSupplyId]."}
+  FQXSPPW0057J: {concept: PSU.PREDICTIVE_FAIL, lenovo_severity: Warning, text: "PSU [SensorName] prediction fault failure has transitioned from normal to non- critical state."}
+  FQXSPPW0006I: {concept: PSU.INPUT.LOST, lenovo_severity: Warning, text: "Power supply [PowerSupplyId] has lost input."}
+  FQXSPPW0007I: {concept: PSU.INPUT.LOST, lenovo_severity: Warning, text: "Power supply [PowerSupplyId] in the enclosure/chassis (MTM-S/N: [MachineSerialNumber]) has lost input."}
+  FQXSPPW0123M: {concept: PSU.INPUT.LOST, lenovo_severity: Error, text: "PSU [SensorName] input failure has transitioned to critical from a less severe state."}
+  FQXSPPW0104J: {concept: PSU.REDUNDANCY.LOST, lenovo_severity: Warning, text: "Power redundancy is lost with sufficient remaining power."}
+  FQXSPPW0110M: {concept: PSU.REDUNDANCY.LOST, lenovo_severity: Error, text: "Power redundancy is lost with insufficient remaining power."}
+  FQXSPSD0001L: {concept: DISK.FAIL, lenovo_severity: Error, text: "The [DriveName] has a fault."}
+  FQXSPSD0002L: {concept: DISK.FAIL, lenovo_severity: Error, text: "Drive [DriveLocation] in the enclosure/chassis (MTM-S/N: [MachineSerialNumber]) has a fault."}
+  FQXSPSD0002G: {concept: DISK.PREDICTIVE_FAIL, lenovo_severity: Warning, text: "Failure Predicted on [DriveName]."}
+  FQXSPSD0003G: {concept: DISK.PREDICTIVE_FAIL, lenovo_severity: Warning, text: "Failure Predicted on drive [DriveLocation] in the enclosure/chassis (MTM-S/N: [MachineSerialNumber])."}
+  FQXSPMA0039G: {concept: MEM.DIMM.FAIL, lenovo_severity: Warning, text: "DIMM [DIMMID] is disabled."}
+  FQXSPOS4009I: {concept: OS.KERNEL.PANIC, lenovo_severity: Info, text: "OS Crash Video Captured."}
+  FQXSFIO0035M: {concept: PCIE.UNCORR.NONFATAL, lenovo_severity: Error, text: "An Uncorrectable PCIe Error has Occurred at Segment 0x[arg1] Bus 0x[arg2] Device 0x[arg3] Function 0x[arg4]. The Vendor ID for the device is 0x[arg5] and the Device ID is 0x[arg6]. The physical [arg7] number is [arg8]."}
+  FQXSFIO0036G: {concept: PCIE.CORR, lenovo_severity: Warning, text: "PCIe Correctable Error Threshold limit has been exceeded at Segment 0x[arg1] Bus 0x[arg2] Device 0x[arg3] Function 0x[arg4]. The Vendor ID for the device is 0x[arg5] and the Device ID is 0x[arg6]. The physical [arg7] number is [arg8]."}
+  FQXSFIO0022J: {concept: LINK.DEGRADED, lenovo_severity: Warning, text: "PCIe Link Width has degraded from [arg1] to [arg2] in physical [arg3] number [arg4]."}
+  FQXSFIO0023J: {concept: LINK.DEGRADED, lenovo_severity: Warning, text: "PCIe Link Speed has degraded from [arg1] to [arg2] in physical [arg3] number [arg4]."}
+  FQXSFIO0005M: {concept: CPU.LINK.DEGRADED, lenovo_severity: Error, text: "An intra-board UPI failure has been detected on the link between processor [arg1] port [arg2] and processor [arg3] port [arg4]."}
+  FQXSFIO0006M: {concept: CPU.LINK.DEGRADED, lenovo_severity: Error, text: "An inter-board UPI failure has been detected on the link between processor [arg1] port [arg2] and processor [arg3] port [arg4]."}
+  FQXSFIO0008M: {concept: CPU.LINK.DEGRADED, lenovo_severity: Warning, text: "An intra-board UPI dynamic link width reduction has been detected on the link between processor [arg1] port [arg2] and processor [arg3] port [arg4]."}
+  FQXSFIO0009M: {concept: CPU.LINK.DEGRADED, lenovo_severity: Warning, text: "An inter-board UPI dynamic link width reduction has been detected on the link between processor [arg1] port [arg2] and processor [arg3] port [arg4]."}
+  FQXSFMA0002M: {concept: MEM.ECC.UNCORR, lenovo_severity: Error, text: "An uncorrectable memory error has been detected on DIMM [arg1] at address [arg2]. [arg3]"}
+  FQXSFMA0063I: {concept: MEM.ECC.CORR, lenovo_severity: Info, text: "A correctable memory error handled by ADDDC on DIMM [arg1]. DIMM identifier is [arg2]."}
+  FQXSFMA0008M: {concept: MEM.DIMM.FAIL, lenovo_severity: Error, text: "DIMM [arg1] has failed the POST memory test. [arg2]"}
+  FQXSFMA0049M: {concept: MEM.DIMM.FAIL, lenovo_severity: Warning, text: "DIMM [arg1] disabled due to memory module power failure. DIMM [arg2] detected and good, DIMM [arg3] not detected."}
+  FQXSFMA0064M: {concept: MEM.DIMM.FAIL, lenovo_severity: Warning, text: "DIMM [arg1] disabled due to memory module power failure. DIMM [arg2] detected and good."}
+  FQXSFMA0027K: {concept: MEM.CONFIG.ERROR, lenovo_severity: Error, text: "Invalid memory configuration (Unsupported DIMM Population) detected. Please verify memory configuration is valid."}
+  FQXSFPU0018N: {concept: CPU.IERR.CATERR, lenovo_severity: Error, text: "CATERR(IERR) has asserted on processor [arg1]. This is reported when FEH detects CPU IERR."}
+  FQXSFPU0019N: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, text: "An uncorrectable error has been detected on processor [arg1]. This is reported when FEH detects CPU MCERR."}
+  FQXSFPU0027N: {concept: CPU.MCE.LOGGED, lenovo_severity: Error, text: "System uncorrectable error has occurred on Processor [arg1] Core [arg2] MC bank [arg3] with MC Status [arg4], MC Address [arg5], and MC Misc [arg6]."}

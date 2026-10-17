@@ -18,35 +18,7 @@
 
 version: "0.3.0-dell"
 
-concepts:
-  PSU.INPUT.LOST:        {severity: crit, cause: platform, triage: check_power_feed,
-                          desc: "Power supply is not receiving input power (PSU or cable)"}
-  PSU.REDUNDANCY.LOST:   {severity: crit, cause: platform, triage: check_power_feed,
-                          desc: "Power supply redundancy is lost"}
-  FAN.FAIL:              {severity: crit, cause: hardware, triage: replace_fan,
-                          desc: "Fan speed below the lower critical threshold"}
-  THERMAL.OUT_OF_RANGE:  {severity: crit, cause: platform, triage: check_cooling,
-                          desc: "A system board temperature is outside of range"}
-  VOLT.OUT_OF_RANGE:     {severity: crit, cause: hardware, triage: check_board_power,
-                          desc: "A system board voltage is outside of range"}
-  DISK.PREDICTIVE_FAIL:  {severity: warn, cause: hardware, triage: replace_disk_planned,
-                          desc: "Drive self-monitoring predicts failure; replace before it fails"}
-  CPU.INIT.FAIL: {severity: crit, cause: hardware, fatal: true, triage: replace_cpu_or_board, desc: "CPU failed self-test or initialization"}
-  CPU.THROTTLE: {severity: warn, cause: platform, triage: check_cooling, desc: "CPU throttled"}
-  CPU.LINK.DEGRADED: {severity: warn, cause: hardware, triage: check_cpu_interconnect, desc: "CPU interconnect link width degraded"}
-  MEM.DIMM.FAIL: {severity: crit, cause: hardware, triage: replace_dimm, desc: "Memory device failed or was disabled"}
-  MEM.ECC.CORR_LIMIT: {severity: crit, cause: hardware, triage: replace_dimm, desc: "Correctable memory error limit reached (logging may stop)"}
-  MEM.CONFIG.ERROR: {severity: crit, cause: platform, triage: check_memory_population, desc: "Unsupported memory configuration"}
-  PCIE.TIMEOUT: {severity: crit, cause: hardware, triage: check_link, desc: "PCIe bus time-out on a component"}
-  LINK.DEGRADED: {severity: warn, cause: hardware, triage: check_link, desc: "PCIe link trained below expected width or speed"}
-  PSU.PREDICTIVE_FAIL: {severity: warn, cause: hardware, triage: replace_psu_planned, desc: "Power supply predicts its own failure"}
-  OS.BOOT.FAIL: {severity: crit, cause: any, triage: check_boot_device, desc: "Server failed to boot from a device"}
-  GPU.THERMAL.CRIT: {severity: crit, cause: platform, triage: check_cooling, desc: "GPU or GPU baseboard above its critical temperature"}
-  GPU.MEM.HEALTH.WARN: {severity: warn, cause: hardware, triage: watch_rate, desc: "GPU memory health degraded by single or double bit errors (iDRAC view)"}
-  GPU.MEM.HEALTH.CRIT: {severity: crit, cause: hardware, triage: drain_and_cordon, desc: "GPU memory health critical because of single or double bit errors (iDRAC view)"}
-  GPU.CONFIG.MISMATCH: {severity: warn, cause: platform, triage: check_gpu_population, desc: "GPU models mixed or GPUs in wrong slots"}
-  GPU.BASEBOARD.CRIT_LOG: {severity: crit, cause: hardware, triage: collect_tsr_gpu_debug, desc: "GPU baseboard saved log data about critical events"}
-  GPU.POWER.CABLE: {severity: crit, cause: platform, triage: check_gpu_power_cables, desc: "GPU power cables connected incorrectly"}
+# concepts used here are defined in vendor_common_v0.3.yaml
 
 message_ids:
   CPU0001: {concept: CPU.THERMTRIP, dell_severity: Critical, text: "CPU arg1 has a thermal trip (over-temperature) event."}

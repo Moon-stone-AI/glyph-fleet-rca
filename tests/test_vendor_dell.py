@@ -17,8 +17,8 @@ T = "2026-10-13T14:00:01 "
 
 class DellMessageIds(unittest.TestCase):
     def test_every_id_has_a_known_concept_and_a_source(self):
-        self.assertGreaterEqual(len(CB.message_ids), 60)
-        for mid, rule in CB.message_ids.items():
+        self.assertGreaterEqual(sum("dell_severity" in v for v in CB.message_ids.values()), 60)
+        for mid, rule in ((k, v) for k, v in CB.message_ids.items() if "dell_severity" in v):
             with self.subTest(mid=mid):
                 self.assertIn(rule["concept"], CB.concepts)
                 self.assertTrue(rule.get("text"))
