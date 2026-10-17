@@ -7,7 +7,7 @@ Fleet directory layout:
     <fleet>/<host>/diag.csv    optional active diagnostics results: timestamp,gpu,test,result
     <fleet>/<host>/pcie.txt    optional PCIe tree
     <fleet>/inventory.csv      optional: host,fw,bios,...
-    <fleet>/gpus.csv           optional: host,bdf,uuid,model,hours (GPU identity for the health index)
+    <fleet>/gpus.csv           optional: host,bdf,uuid,model,hours[,idrac_slot] (GPU identity for the health index)
 
 (c) 2026 Vitali de Mille. PolyForm Noncommercial 1.0.0.
 """

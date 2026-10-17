@@ -59,6 +59,28 @@ class DellMessageIds(unittest.TestCase):
         self.assertEqual(e.concept, "PCIE.FATAL")
         self.assertIn("pci=bus2.dev0.fn0", e.args)
 
+    def test_hex_bdf_and_gpu_index_args(self):
+        e = ENC.encode(T + "UEFI0031 PCIe downtrain is detected on Slot 36 (Bus:0x5B Dev:0x02 F:0x00). "
+                           "Expected link width: 16 Actual link width: 8.")
+        self.assertIn("bdf=0000:5b:02.0", e.args)
+        self.assertIn("slot=36", e.args)
+        self.assertIn("gpu=3", ENC.encode(T + "GPU0001 GPU_3 temperature 92 above Upper Critical Temperature 90.").args)
+
+    def test_idrac_slot_binds_bmc_gpu_events_to_the_card(self):
+        from glyphrca.health import gpu_health
+        gpus = {("h", "0000:1b:00.0"): {"host": "h", "bdf": "0000:1b:00.0", "hours": "", "idrac_slot": "GPU_2"},
+                ("h", "0000:43:00.0"): {"host": "h", "bdf": "0000:43:00.0", "hours": "", "idrac_slot": "GPU_3"}}
+        ev = [ENC.encode(T + "HWC9052 The health of Graphics Processing Unit (GPU) device 2 is critical because of "
+                             "single or double bit errors on the memory cells.")]
+        cards = {c["bdf"]: c for c in gpu_health({"h": ev}, {}, gpus, set())}
+        self.assertEqual(cards["0000:1b:00.0"]["breakdown"].get("memory"), 15)
+        self.assertNotIn("memory", cards["0000:43:00.0"]["breakdown"])
+        # without idrac_slot the event reaches no card, rather than a guessed one
+        for g in gpus.values():
+            g.pop("idrac_slot")
+        cards = gpu_health({"h": ev}, {}, gpus, set())
+        self.assertTrue(all("memory" not in c["breakdown"] for c in cards))
+
     def test_cpu0000_is_not_read_as_ierr(self):
         self.assertNotIn("CPU0000", CB.message_ids)  # guide: informational "check for additional logs"
 

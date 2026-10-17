@@ -117,6 +117,8 @@ EDAC_LOC = re.compile(r"(CPU_SrcID#\d+_MC#\d+_Chan#\d+_DIMM#\d+)")
 CPU_ARG = re.compile(r"\bCPU (\d+)\b")
 MSG_ID = re.compile(r"\b([A-Z]{2,4}\d{2,4})\b")          # vendor message IDs: Dell MEM0001, NIC100, PDR16
 BUS_DEV_FN = re.compile(r"\bbus (\d+) device (\d+) function (\d+)", re.I)   # Dell text form
+HEX_BDF = re.compile(r"\bBus:\s*0x([0-9a-f]{1,2})\s+Dev:\s*0x([0-9a-f]{1,2})\s+F(?:unc)?:\s*0x([0-7])", re.I)  # explicit hex
+GPU_IDX = re.compile(r"\bGPU[_ ](\d+)\b|\bGPU\)? device (\d+)\b", re.I)                   # iDRAC: GPU_3, GPU device 2
 ARG_NAME = {"processor": "cpu", "module": "dimm"}
 
 
@@ -141,6 +143,9 @@ def text_args(line: str) -> tuple[str, ...]:
     args += [f"bdf={b.lower()}" for b in BDF.findall(line)]
     # Dell prints "bus 2 device 0 function 0"; kept as written: whether the numbers are decimal is not confirmed
     args += [f"pci=bus{b}.dev{d}.fn{f}" for b, d, f in BUS_DEV_FN.findall(line)]
+    # only an explicit 0x prefix is trusted to be hexadecimal, so only this form becomes a bdf
+    args += [f"bdf=0000:{int(b, 16):02x}:{int(d, 16):02x}.{f}" for b, d, f in HEX_BDF.findall(line)]
+    args += [f"gpu={a or b}" for a, b in GPU_IDX.findall(line)]
     return tuple(args)
 
 
