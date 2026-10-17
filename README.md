@@ -131,6 +131,17 @@ BMC logs now read by message ID (or, for HPE, by message text), each entry taken
 - iDRAC names GPUs by index or slot. An optional `idrac_slot` column in `gpus.csv`, taken from each server's own inventory, binds those events to the right GPU card. No platform topology is assumed.
 - What the guides show: BMCs see GPUs coarsely (temperature, power, board status). Xid, ECC, row remapping and NVLink faults come from the kernel and DCGM roads, which is why the tool reads all of them.
 
+### v0.4: work queues and the failure-pattern loop
+
+Faulty nodes are sorted into **work queues by symptom**: GPU off the bus, GPU memory, NVLink, PCIe and risers, CPU, host memory, power, thermal, network, drives, OS, unknown codes. Each node sits in one queue, by its most severe symptom; a fleet-wide crash with one cause is one queue for engineering, not thousands of tickets, and application errors on many servers go back to the job owner. Lemons lead their queue. `--buckets-csv` writes one row per node for ticketing; queues, owners and actions live in `codebook/buckets_v0.4.yaml`.
+
+From a queue to knowledge, the way a practitioner works:
+
+1. `python -m glyphrca patterns FLEET --bucket gpu_memory` splits the queue into its patterns and mines each one: which events, in which order, how far apart, on how many GPUs, how it ends.
+2. Each pattern becomes a **draft record** in the C_GPU_Faults format, anonymous by construction (no hosts, addresses or serials).
+3. A practitioner reviews it, gives it a fault code and the fix, and adds it to `codebook/fault_library.yaml`.
+4. From then on, matching nodes are labelled with the known pattern and its fix in every report. Drafts never label nodes.
+
 ### PCIe tree as a map
 Bus numbers differ between servers; slot paths (`RP1/SW1/GPU5`) do not. The most common tree shape is the golden tree. Errors carrying a BDF are mapped onto it:
 - errors on two or more devices behind the same switch, on several servers → **suspect the switch or riser**, not the GPUs;
@@ -174,6 +185,8 @@ codebook/telemetry_v0.2.yaml telemetry codebook: DCGM metrics (exporter and fiel
 codebook/diag_v0.2.yaml   active diagnostics codebook: DCGM diagnostic plugins, SDC vs other failures
 codebook/health_v0.2.1.yaml GPU health index: components, penalties, caps, bands
 codebook/vendor_*_v0.3.yaml vendor codebooks: Dell iDRAC, Lenovo XCC/UEFI, HPE IML; shared vendor concepts
+codebook/buckets_v0.4.yaml work queues: symptom buckets, owners, actions
+codebook/fault_library.yaml reviewed failure patterns (C_GPU_Faults records) that label matching nodes
 glyphrca/encode.py       L1, L2 (binary, text and kernel roads, template cache)
 glyphrca/fleet.py        L3 runs, L4 signatures, survivors, inventory join, simultaneity,
                          software-wide failures, lemon nodes

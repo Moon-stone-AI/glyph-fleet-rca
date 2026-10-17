@@ -1,0 +1,9 @@
+# GlyphAI fleet-RCA: reviewed fault library (C_GPU_Faults record format)
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# The loop: `python -m glyphrca patterns FLEET --bucket gpu_memory` mines draft records from one work queue.
+# A practitioner reviews a draft, sets its fault_code, writes the fix in practitioner_notes and sets
+# review.status to practitioner_reviewed, then adds it here. From then on, every analysis labels the nodes
+# that show all of the record's symptom concepts with this pattern and its fix. Drafts never label nodes.
+# Records hold class-level knowledge only: no hosts, sites, serials, tickets or people other than the reviewer.
+[]

@@ -18,7 +18,7 @@ import zlib
 from collections import Counter
 from pathlib import Path
 
-from . import buckets, health, pcie
+from . import buckets, health, patterns, pcie
 from .encode import Codebook, Encoder
 from .fleet import (build_fleet, crashed, escalations, inventory_join, lemon_nodes, load_inventory,
                     orphan_cleanups, simultaneity, software_wide, zombie_gpus, aer_storms)
@@ -34,7 +34,8 @@ def _bdf_of(e) -> str:
     return next((a[4:] for a in e.args if a.startswith("bdf=")), "?")
 
 
-def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_baseline: bool = True) -> dict:
+def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_baseline: bool = True,
+                  keep: dict | None = None, library_path=None) -> dict:
     fleet_dir = Path(fleet_dir)
     cb = codebook or Codebook.load()
     enc = Encoder(cb)
@@ -117,6 +118,14 @@ def analyse_fleet(fleet_dir: str | Path, codebook: Codebook | None = None, gzip_
             sw_hosts.setdefault(h, set()).add(c)
     missing_gpu = {h for p_, hs in (topo.missing.items() if topo else []) if "GPU" in p_ for h in hs}
     queues = buckets.bucketize(events, cb, common_mode, sw_hosts, set(lemons), missing_gpu)
+    library = patterns.load_library(library_path) if library_path else patterns.load_library()
+    known = patterns.match(events, library) if library else {}
+    for q in queues:
+        for n in q["nodes"]:
+            if n["host"] in known:
+                n["known"] = known[n["host"]][0]
+    if keep is not None:
+        keep["events"] = events
     gpu_unknown = Counter(a for ev in events.values() for e in ev if e.concept == "GPU.XID.OTHER"
                           for a in e.args if a.startswith("xid="))
     elapsed = time.perf_counter() - t0
@@ -271,9 +280,13 @@ def render_text(r: dict) -> str:
         out.append("\nWork queues by symptom (each faulty node in one queue; lemons first, then most critical):")
         for q in r["buckets"]:
             first = ", ".join(n["host"] + ("*" if n["lemon"] else "") for n in q["nodes"][:4])
+            known_codes = Counter(n["known"]["fault_code"] for n in q["nodes"] if n.get("known"))
             more = f" +{len(q['nodes']) - 4}" if len(q["nodes"]) > 4 else ""
             out.append(f"  {len(q['nodes']):>5}  {q['label']:<58} [{q['owner']}] {first}{more}")
             out.append(f"         -> {q['action']}")
+            for code, k in known_codes.most_common(3):
+                fix = next(n["known"]["fix"] for n in q["nodes"] if n.get("known", {}).get("fault_code") == code)
+                out.append(f"         known pattern {code} on {k} node(s): {fix}")
         out.append("  (* lemon node)")
     if r.get("escalations"):
         out.append("\nEscalations (a light triage repeated too often on one GPU):")
