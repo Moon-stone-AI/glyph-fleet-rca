@@ -127,6 +127,12 @@ BDF = re.compile(r"\b([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])\b", re.I)
 WORD = re.compile(r"[a-z]+(?:-[a-z]+)*")
 EDAC_LOC = re.compile(r"(CPU_SrcID#\d+_MC#\d+_Chan#\d+_DIMM#\d+)")
 CPU_ARG = re.compile(r"\bCPU (\d+)\b")
+# Lenovo event ID format FQXppnnxxxxc (Lenovo docs, "Event and alert message format"):
+# pp = product (SP service processor, SF system firmware, ...), nn = component, c = severity letter
+LENOVO_ID = re.compile(r"\bFQX([A-Z]{2})([A-Z]{2})\d{4}([A-Z])\b")
+LENOVO_SEV = {"A": "immediate", "B": "unknown", "D": "decision", "E": "eventual", "F": "warning", "G": "warning",
+              "H": "minor", "I": "info", "J": "minor", "K": "major", "L": "major", "M": "critical", "N": "fatal",
+              "W": "wait"}
 MSG_ID = re.compile(r"\b(FQX[A-Z]{2,6}\d{4}[A-Z]|[A-Z]{2,4}\d{2,4})\b")  # vendor IDs: Dell MEM0001, PDR16; Lenovo FQXSPIO0013N
 BUS_DEV_FN = re.compile(r"\bbus (\d+) device (\d+) function (\d+)", re.I)   # Dell text form
 HEX_BDF = re.compile(r"\bBus:?\s*0x([0-9a-f]{1,2}),?\s+Dev(?:ice)?:?\s*0x([0-9a-f]{1,2}),?\s+F(?:unc(?:tion)?)?:?\s*0x([0-7])", re.I)  # explicit hex (Dell-style, Lenovo UEFI)
@@ -315,7 +321,12 @@ class Encoder:
         if hit is None:
             w = self.words(line)
             hit = self._cache[key] = (w, self.concept(w))
-        return Event(parse_ts(line), hit[1], text_args(line), hit[0], line.rstrip("\n"))
+        args = text_args(line)
+        lid = LENOVO_ID.search(line)
+        if lid:  # an unmapped Lenovo ID still tells the component and the severity
+            args = (f"lenovo={lid.group(0)}", f"component={lid.group(2)}",
+                    f"vendor_severity={LENOVO_SEV.get(lid.group(3), lid.group(3))}") + args
+        return Event(parse_ts(line), hit[1], args, hit[0], line.rstrip("\n"))
 
     def encode_file(self, path: str | Path, source: str = "sel") -> list[Event]:
         if source == "telemetry":

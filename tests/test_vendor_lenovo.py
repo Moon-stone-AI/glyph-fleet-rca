@@ -41,6 +41,11 @@ class LenovoEventIds(unittest.TestCase):
                 self.assertEqual(e.concept, concept)
                 self.assertEqual(e.args[0], "msg=" + line.split(":")[0])
 
+    def test_unmapped_lenovo_id_is_decoded(self):
+        e = ENC.encode(T + "FQXSPMA0130N: Memory PMIC Group1 has transitioned to non-recoverable.")
+        self.assertIn("component=MA", e.args)
+        self.assertIn("vendor_severity=fatal", e.args)
+
     def test_uefi_hex_address_becomes_bdf(self):
         e = ENC.encode(T + "FQXSFIO0035M: An Uncorrectable PCIe Error has Occurred at Segment 0x0 Bus 0x41 "
                            "Device 0x00 Function 0x0. The Vendor ID for the device is 0x10de and the Device ID is 0x2330.")
