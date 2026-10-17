@@ -96,7 +96,7 @@ Data gaps (Xid codes not in the codebook): {'xid=154': 2}
 - **Unknown Xid codes are reported, not guessed.**
 - **Stable signatures.** A signature is the order in which concepts first appear, so two sources interleaving line by line still tell one story: the survivor is still found.
 
-### v0.2.1 (branch `gpu-health`): a health index for every GPU
+### v0.2.1: a health index for every GPU
 
 With `gpus.csv` (host, bdf, uuid, model, hours) each GPU gets a card with a health index from 0 to 100 %, built from its own history across all sources:
 
@@ -115,6 +115,21 @@ GPU health index (0-100 %, from each GPU's own history; not a survival probabili
 - The index describes the past. It is not a probability of survival: that would need real failure data.
 - PCIe floods during a common-mode crash are not charged to the GPUs.
 - `--health-csv cards.csv` writes one row per GPU, for a fleet sale or a refresh decision.
+
+### v0.3: vendor codebooks from the official guides
+
+BMC logs now read by message ID (or, for HPE, by message text), each entry taken from the vendor's own reference:
+
+| Vendor | Source | Coverage |
+|---|---|---|
+| Dell iDRAC9 | PowerEdge Servers Error and Event Messages Reference Guide, July 2026 | 69 IDs: PCIe fatal/time-out/downtrain, CPU, memory, power, cooling, GPU (GPU0001, TMP0401/0402, HWC9051/9052, ACC0001) |
+| Lenovo XCC / UEFI | ThinkSystem SR650 V4, SR680a V3, SR780a V3 Messages and Codes Reference | 67 IDs, plus component and severity decoded from any `FQXppnnxxxxc` ID |
+| HPE iLO IML | IML Messages and Troubleshooting Guide, Gen10/Gen10 Plus and Gen11 | 53 message templates keyed by Error Class / Error Code |
+
+- A line with a known ID goes straight to its glyph; anything else still takes the word road.
+- Explicit-hex PCIe addresses (`Bus 0x41 Device 0x00 Function 0x0`) become a bdf; decimal-looking forms are kept as written, never guessed.
+- iDRAC names GPUs by index or slot. An optional `idrac_slot` column in `gpus.csv`, taken from each server's own inventory, binds those events to the right GPU card. No platform topology is assumed.
+- What the guides show: BMCs see GPUs coarsely (temperature, power, board status). Xid, ECC, row remapping and NVLink faults come from the kernel and DCGM roads, which is why the tool reads all of them.
 
 ### PCIe tree as a map
 Bus numbers differ between servers; slot paths (`RP1/SW1/GPU5`) do not. The most common tree shape is the golden tree. Errors carrying a BDF are mapped onto it:
@@ -147,7 +162,7 @@ python -m unittest discover -s tests -v                      # 38 tests
 <fleet>/<host>/diag.csv    optional: active diagnostics results, columns timestamp,gpu,test,result
 <fleet>/<host>/pcie.txt    optional: <BDF> <parent BDF|-> <kind> <slot> x<w>/x<max> gen<g>/gen<max>
 <fleet>/inventory.csv      optional: host,fw,bios,...
-<fleet>/gpus.csv           optional: host,bdf,uuid,model,hours (GPU identity for the health index)
+<fleet>/gpus.csv           optional: host,bdf,uuid,model,hours[,idrac_slot] (GPU identity for the health index)
 ```
 
 ## Repository
@@ -157,6 +172,8 @@ codebook/sel_v0.1.yaml   SEL codebook: concepts, binary SEL decoding, lexicon, p
 codebook/kernel_v0.2.yaml kernel codebook: GPU/NVLink/host concepts, Xid table, kernel rules, escalation
 codebook/telemetry_v0.2.yaml telemetry codebook: DCGM metrics (exporter and field names), thresholds
 codebook/diag_v0.2.yaml   active diagnostics codebook: DCGM diagnostic plugins, SDC vs other failures
+codebook/health_v0.2.1.yaml GPU health index: components, penalties, caps, bands
+codebook/vendor_*_v0.3.yaml vendor codebooks: Dell iDRAC, Lenovo XCC/UEFI, HPE IML; shared vendor concepts
 glyphrca/encode.py       L1, L2 (binary, text and kernel roads, template cache)
 glyphrca/fleet.py        L3 runs, L4 signatures, survivors, inventory join, simultaneity,
                          software-wide failures, lemon nodes
@@ -170,7 +187,7 @@ tests/                   unit and end-to-end tests
 
 ## Limits
 
-- The codebooks cover a core set of events. Real fleets need the full Intel tables, each vendor's OEM records and Windows Event Log (WHEA).
+- The vendor codebooks cover the fleet-relevant part of each guide, not every message. Supermicro, AMD-specific records and Windows Event Log (WHEA) are not yet covered.
 - Thresholds (rates, escalation counts, storm sizes) are starting values from practice, to be tuned per fleet.
 - Kernel rules match the common message formats; drivers and kernel versions vary, and new formats surface as ignored lines or data gaps.
 - Synthetic scenarios are cleaner than reality: SEL overflow, BMC clock skew and truncated logs will create noise that v0.1 does not model.
@@ -179,14 +196,14 @@ tests/                   unit and end-to-end tests
 ## Roadmap
 
 - ~~v0.2 Linux kernel and NVIDIA Xid~~ (done)
-- v0.3 vendor codebooks: Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, full Intel tables, AMD
+- ~~v0.3 vendor codebooks: Dell iDRAC, Lenovo XCC, HPE iLO~~ (done); next: Supermicro, full Intel tables, AMD
 - agent (beyond log analysis): job-aware blast radius (requeue the whole multi-node job through Slurm, Volcano or Ray, not just drain one node); NVLink state polling for degraded links; health-query watchdog for baseboard management hangs; ghost GPU contexts after container crashes; scheduling pre-flight diagnostics on drained nodes
 - v0.4 Windows Event Log in several languages: one glyph whatever the language
 - later: rate-based states (a burst vs. a slow leak), interactive fleet view
 
 ## Acknowledgements
 
-Triage notes and failure patterns in the kernel and telemetry codebooks come from the operational records of Vitali de Mille (data-centre and GPU fleet operations). Metric names and Xid meanings were checked against NVIDIA DCGM and Xid documentation.
+Triage notes and failure patterns in the kernel and telemetry codebooks come from the operational records of Vitali de Mille (data-centre and GPU fleet operations). Metric names and Xid meanings were checked against NVIDIA DCGM and Xid documentation. Vendor message IDs and texts come from the Dell, Lenovo and HPE reference guides named above.
 
 ## License
 
