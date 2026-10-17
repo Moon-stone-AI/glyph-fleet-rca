@@ -43,7 +43,7 @@ penalties:
   POWER.THROTTLE:          {component: throttling,  points: 5,  count: once}
   GPU.THERMAL.THROTTLE:    {component: throttling,  points: 5,  count: once}
   GPU.DIAG.FAIL:           {component: diagnostics, points: 10, count: once}
-  # BMC (Dell iDRAC) views of GPU health, bound to a card through gpus.csv idrac_slot; proposed, to approve
+  # BMC (Dell iDRAC) views of GPU health, bound to a card through gpus.csv idrac_slot; approved by Vitali de Mille, 17 Oct 2026
   GPU.MEM.HEALTH.WARN:     {component: memory,      points: 5,  count: once}
   GPU.MEM.HEALTH.CRIT:     {component: memory,      points: 15, count: once}
   GPU.THERMAL.CRIT:        {component: throttling,  points: 5,  count: once}
