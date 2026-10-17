@@ -22,7 +22,7 @@ DEFAULT_CODEBOOK = CODEBOOK_DIR / "sel_v0.1.yaml"
 DEFAULT_CODEBOOKS = (CODEBOOK_DIR / "sel_v0.1.yaml", CODEBOOK_DIR / "kernel_v0.2.yaml",
                      CODEBOOK_DIR / "telemetry_v0.2.yaml", CODEBOOK_DIR / "diag_v0.2.yaml",
                      CODEBOOK_DIR / "vendor_common_v0.3.yaml", CODEBOOK_DIR / "vendor_dell_v0.3.yaml",
-                     CODEBOOK_DIR / "vendor_lenovo_v0.3.yaml")
+                     CODEBOOK_DIR / "vendor_lenovo_v0.3.yaml", CODEBOOK_DIR / "vendor_hpe_v0.3.yaml")
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,14 @@ class Event:
     words: tuple[str, ...]    # L1 word glyphs (empty for binary records)
     raw: str                  # the original line, kept so a human can read the last words
     source: str = "sel"       # sel | kernel | telemetry | diag
+
+
+def _template_regex(template: str) -> re.Pattern:
+    """A vendor message string -> regex. Only the part before the first '(' is used, so detail fields
+    in brackets may differ; %1, %2 ... match any value."""
+    head = template.split("(")[0].strip().rstrip(".")
+    parts = re.split(r"%\d+", head)
+    return re.compile(r".*?".join(re.escape(p.strip()) for p in parts if p.strip()), re.I)
 
 
 @dataclass
@@ -50,6 +58,7 @@ class Codebook:
     aer_storm: dict = field(default_factory=dict)
     diag: dict = field(default_factory=dict)
     message_ids: dict = field(default_factory=dict)  # vendor message ID (e.g. Dell MEM0001) -> rule
+    templates: list = field(default_factory=list)    # (regex, rule): vendor message texts without an ID (HPE IML)
 
     @classmethod
     def load(cls, paths=DEFAULT_CODEBOOKS) -> "Codebook":
@@ -72,6 +81,8 @@ class Codebook:
             cb.aer_storm.update(d.get("aer_storm", {}))
             cb.diag.update(d.get("diag", {}))
             cb.message_ids.update(d.get("message_ids", {}))
+            for t in d.get("text_templates", []):
+                cb.templates.append((_template_regex(t["template"]), t))
             for m in d.get("metrics", []):
                 for n in m["names"]:
                     cb.metrics[n] = m
@@ -118,7 +129,7 @@ EDAC_LOC = re.compile(r"(CPU_SrcID#\d+_MC#\d+_Chan#\d+_DIMM#\d+)")
 CPU_ARG = re.compile(r"\bCPU (\d+)\b")
 MSG_ID = re.compile(r"\b(FQX[A-Z]{2,6}\d{4}[A-Z]|[A-Z]{2,4}\d{2,4})\b")  # vendor IDs: Dell MEM0001, PDR16; Lenovo FQXSPIO0013N
 BUS_DEV_FN = re.compile(r"\bbus (\d+) device (\d+) function (\d+)", re.I)   # Dell text form
-HEX_BDF = re.compile(r"\bBus:?\s*0x([0-9a-f]{1,2})\s+Dev(?:ice)?:?\s*0x([0-9a-f]{1,2})\s+F(?:unc(?:tion)?)?:?\s*0x([0-7])", re.I)  # explicit hex (Dell-style, Lenovo UEFI)
+HEX_BDF = re.compile(r"\bBus:?\s*0x([0-9a-f]{1,2}),?\s+Dev(?:ice)?:?\s*0x([0-9a-f]{1,2}),?\s+F(?:unc(?:tion)?)?:?\s*0x([0-7])", re.I)  # explicit hex (Dell-style, Lenovo UEFI)
 GPU_IDX = re.compile(r"\bGPU[_ ](\d+)\b|\bGPU\)? device (\d+)\b", re.I)                   # iDRAC: GPU_3, GPU device 2
 ARG_NAME = {"processor": "cpu", "module": "dimm"}
 
@@ -295,6 +306,10 @@ class Encoder:
             rule = self.cb.message_ids.get(mid)
             if rule:
                 return Event(parse_ts(line), rule["concept"], (f"msg={mid}",) + text_args(line), (), line.rstrip("\n"))
+        for rx, rule in self.cb.templates:
+            if rx.search(line):
+                return Event(parse_ts(line), rule["concept"], (f"hpe={rule['hpe']}",) + text_args(line), (),
+                             line.rstrip("\n"))
         key = VARIABLE.sub("#", line)
         hit = self._cache.get(key)
         if hit is None:

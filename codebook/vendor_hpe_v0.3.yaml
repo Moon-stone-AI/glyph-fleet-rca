@@ -1,0 +1,49 @@
+# GlyphAI fleet-RCA codebook, vendor domain: HPE ProLiant Integrated Management Log (IML), v0.3
+# (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
+#
+# Source for every entry: HPE, "Integrated Management Log Messages and Troubleshooting Guide for HPE ProLiant
+# Gen10, Gen10 Plus Servers and HPE Synergy", Part Number 30-EB5CD181-001, September 2026 (211 messages).
+# HPE IML lines carry the message text, not an ID; the guide keys each message by Error Class / Error Code
+# (kept here as 'hpe'). So this road matches the text: each template is the guide's Symptom string, where
+# %1, %2 ... are the guide's placeholders and match any value.
+#
+# Notes from checking the guide:
+# - "Uncorrectable machine check exception" (0005/0003) is read as CPU.IERR.CATERR: an uncorrectable MCE is
+#   the fatal CPU event that IPMI BMCs log as CATERR/IERR.
+# - PCIe uncorrectable errors carry an explicit hex address (Segment 0x.., Bus 0x.., Device 0x.., Function 0x..),
+#   which the encoder turns into a bdf.
+# - This Gen10 guide has no GPU-specific IML messages; Gen11 and GPU platforms (e.g. XD670, XD685) need their own.
+
+version: "0.3.0-hpe"
+
+concepts:
+  OS.HANG.RESET:  {severity: crit, cause: any, fatal: true, triage: read_last_words,
+                   desc: "Automatic Server Recovery: the OS stopped responding and the watchdog reset the server"}
+
+text_templates:
+  - {hpe: "0002/0013", concept: THERMAL.CRIT, template: "The system is overheating. (Temperature Sensor %1, Location %2, Temperature %3)."}
+  - {hpe: "0002/0016", concept: THERMAL.CRIT, template: "%1 Overheating (Temperature Sensor %2, Location %3, Temperature %4, %5)"}
+  - {hpe: "0002/0028", concept: THERMAL.CRIT, template: "Critical temperature threshold exceeded (Temperature Sensor %1, Location %2, Temperature %3C %4) due to a fan issue."}
+  - {hpe: "0002/002C", concept: THERMAL.OUT_OF_RANGE, template: "The temperature of the PCIe disk %1 has crossed the upper critical threshold."}
+  - {hpe: "0002/0017", concept: FAN.FAIL, template: "Fan failure (Fan %1, Location %2)"}
+  - {hpe: "0002/001A", concept: FAN.FAIL, template: "%1 Fan failure (Fan %2, Location %3, %4)."}
+  - {hpe: "0005/0003", concept: CPU.IERR.CATERR, template: "Uncorrectable machine check exception (%1 %2, APIC ID 0x%3, Bank 0x%4, Status 0x%5'%6, Address 0x%7'%8, Misc 0x%9'%10)."}
+  - {hpe: "0006/0003", concept: CPU.MCE.LOGGED, template: "An uncorrectable UPI error has been detected on a processor."}
+  - {hpe: "0008/0002", concept: PCIE.UNCORR.NONFATAL, template: "Uncorrectable PCI Express Error Detected. %1 %2 (Segment 0x%3, Bus 0x%4, Device 0x%5, Function 0x%6). Uncorrectable Error Status: 0x%7"}
+  - {hpe: "0008/0004", concept: PCIE.UNCORR.NONFATAL, template: "Uncorrectable PCI Express Error Detected. %1 %2 (Segment 0x%2, Bus 0x%3, Device 0x%4, Function 0x%5)."}
+  - {hpe: "000A/0284", concept: MEM.ECC.UNCORR, template: "DIMM failure - Uncorrectable memory error - %1 %2 Dimm %3."}
+  - {hpe: "000A/0388", concept: MEM.ECC.UNCORR, template: "Uncorrectable Memory Error: The failed memory module could not be determined."}
+  - {hpe: "000A/0315", concept: MEM.ECC.UNCORR, template: "An uncorrectable memory error was detected prior to this system boot."}
+  - {hpe: "000A/0461", concept: MEM.ECC.CORR, template: "High rate of corrected memory errors, performance may be degraded (%1 %2, DIMM %3)"}
+  - {hpe: "000A/0460", concept: MEM.ECC.CORR_LIMIT, template: "Correctable Memory Error Threshold exceeded"}
+  - {hpe: "0032/0462", concept: MEM.DIMM.FAIL, template: "Uncorrectable memory error threshold exceeded (%1 %2, DIMM %3). The DIMM is mapped out and is currently not available."}
+  - {hpe: "0032/0215", concept: MEM.DIMM.FAIL, template: "DIMM Initialization Error - Processor %1 DIMM %2. The identified processor and memory failed to initialize properly. %3 (Major Code:%4, Minor Code:%5)."}
+  - {hpe: "0032/0216", concept: MEM.DIMM.FAIL, template: "DIMM initialization error. A fatal error was detected while initializing memory. %1 (Major Code:%2, Minor Code:%3)."}
+  - {hpe: "000A/0500", concept: OS.HANG.RESET, template: "Automatic Server Recovery (ASR) NMI Detected: The ASR NMI has been signaled (per the system configuration policy)."}
+  - {hpe: "000D/0001", concept: OS.HANG.RESET, template: "ASR detected by system ROM"}
+  - {hpe: "000B/0015", concept: PSU.FAIL, template: "The power supply is not functioning."}
+  - {hpe: "000B/0054", concept: PSU.FAIL, template: "System power supply or power source is malfunctioning."}
+  - {hpe: "000B/0036", concept: PSU.REDUNDANCY.LOST, template: "System power supplies are not redundant"}
+  - {hpe: "0011/0008", concept: NET.LINK.DOWN, template: "Network adapter link down on slot %1, port %2."}
+  - {hpe: "0011/0009", concept: NET.LINK.DOWN, template: "Network adapter link down (Chassis %1, Slot %2, Port %3)"}
+  - {hpe: "000A/1716", concept: DISK.FAIL, template: "Unrecoverable media errors detected on drives."}
