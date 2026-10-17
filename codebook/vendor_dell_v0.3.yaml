@@ -1,60 +1,120 @@
-# GlyphAI fleet-RCA codebook, vendor domain: Dell iDRAC message IDs, v0.3 (draft)
+# GlyphAI fleet-RCA codebook, vendor domain: Dell PowerEdge iDRAC message IDs, v0.3
 # (c) 2026 Vitali de Mille. Licensed under PolyForm Noncommercial 1.0.0 (see LICENSE).
 #
-# Road 2b: a Dell iDRAC (iDRAC9 first; iDRAC8 uses the same Event and Error Message IDs) log line
-# that carries a message ID goes straight to its concept glyph. Lines without an ID still take the
-# word road (L1 lexicon -> L2 phrases).
+# Road 2b: a Dell iDRAC9 log line (Lifecycle Log, SEL text, Redfish) that carries a message ID goes
+# straight to its concept glyph. Lines without an ID still take the word road (L1 lexicon -> L2 phrases).
 #
-# Rule: an ID enters this file only with a public source that shows the ID next to its message text.
-# IDs seen only in AI answers or forum guesses are left out and listed under "gaps".
-# The full reference is Dell's "Event and Error Message Reference Guide" for iDRAC9; checking every
-# entry against it is open work.
+# Source for every ID and text below: Dell, "PowerEdge Servers Error and Event Messages Reference Guide",
+# July 2026, Rev. A00 (9,834 message IDs). 'text' is the guide's Message field; arg1, arg2... are its
+# placeholders. 'dell_severity' is the guide's Severity. The concept is the GlyphAI reading of that message.
+#
+# Notes from checking the guide:
+# - CPU0000 is "Internal error has occurred check for additional logs", severity Informational. It is not
+#   mapped to CPU.IERR.CATERR; the IERR text itself still reaches that glyph by words.
+# - PCI1302 is a bus time-out, not a fatal error and not a battery message. Fatal: PCI1318/PCI1358
+#   ("A fatal error ... at bus/slot"), PCI1320/PCI1360 ("A bus fatal error ... at bus/slot"), PCI1363.
+# - GPU events from iDRAC name a GPU by index or slot, not by PCI address, so they do not yet move the
+#   per-GPU health index (which keys on bdf). Mapping slot -> bdf per platform is open work.
 
 version: "0.3.0-dell"
 
 concepts:
   PSU.INPUT.LOST:        {severity: crit, cause: platform, triage: check_power_feed,
-                          desc: "Power supply lost its AC/DC input (feed, PDU or cable)"}
-  PSU.REDUNDANCY.LOST:   {severity: warn, cause: platform, triage: check_power_feed,
-                          desc: "Power supply redundancy lost: the server now runs on one feed"}
+                          desc: "Power supply is not receiving input power (PSU or cable)"}
+  PSU.REDUNDANCY.LOST:   {severity: crit, cause: platform, triage: check_power_feed,
+                          desc: "Power supply redundancy is lost"}
   FAN.FAIL:              {severity: crit, cause: hardware, triage: replace_fan,
                           desc: "Fan speed below the lower critical threshold"}
-  THERMAL.OUT_OF_RANGE:  {severity: warn, cause: platform, triage: check_cooling,
-                          desc: "A board temperature is outside its normal range"}
+  THERMAL.OUT_OF_RANGE:  {severity: crit, cause: platform, triage: check_cooling,
+                          desc: "A system board temperature is outside of range"}
   VOLT.OUT_OF_RANGE:     {severity: crit, cause: hardware, triage: check_board_power,
-                          desc: "A board voltage is outside its normal range"}
+                          desc: "A system board voltage is outside of range"}
   DISK.PREDICTIVE_FAIL:  {severity: warn, cause: hardware, triage: replace_disk_planned,
                           desc: "Drive self-monitoring predicts failure; replace before it fails"}
+  CPU.INIT.FAIL: {severity: crit, cause: hardware, fatal: true, triage: replace_cpu_or_board, desc: "CPU failed self-test or initialization"}
+  CPU.THROTTLE: {severity: warn, cause: platform, triage: check_cooling, desc: "CPU throttled"}
+  CPU.LINK.DEGRADED: {severity: warn, cause: hardware, triage: check_cpu_interconnect, desc: "CPU interconnect link width degraded"}
+  MEM.DIMM.FAIL: {severity: crit, cause: hardware, triage: replace_dimm, desc: "Memory device failed or was disabled"}
+  MEM.ECC.CORR_LIMIT: {severity: crit, cause: hardware, triage: replace_dimm, desc: "Correctable memory error limit reached (logging may stop)"}
+  MEM.CONFIG.ERROR: {severity: crit, cause: platform, triage: check_memory_population, desc: "Unsupported memory configuration"}
+  PCIE.TIMEOUT: {severity: crit, cause: hardware, triage: check_link, desc: "PCIe bus time-out on a component"}
+  LINK.DEGRADED: {severity: warn, cause: hardware, triage: check_link, desc: "PCIe link trained below expected width or speed"}
+  PSU.PREDICTIVE_FAIL: {severity: warn, cause: hardware, triage: replace_psu_planned, desc: "Power supply predicts its own failure"}
+  OS.BOOT.FAIL: {severity: crit, cause: any, triage: check_boot_device, desc: "Server failed to boot from a device"}
+  GPU.THERMAL.CRIT: {severity: crit, cause: platform, triage: check_cooling, desc: "GPU or GPU baseboard above its critical temperature"}
+  GPU.MEM.HEALTH.WARN: {severity: warn, cause: hardware, triage: watch_rate, desc: "GPU memory health degraded by single or double bit errors (iDRAC view)"}
+  GPU.MEM.HEALTH.CRIT: {severity: crit, cause: hardware, triage: drain_and_cordon, desc: "GPU memory health critical because of single or double bit errors (iDRAC view)"}
+  GPU.CONFIG.MISMATCH: {severity: warn, cause: platform, triage: check_gpu_population, desc: "GPU models mixed or GPUs in wrong slots"}
+  GPU.BASEBOARD.CRIT_LOG: {severity: crit, cause: hardware, triage: collect_tsr_gpu_debug, desc: "GPU baseboard saved log data about critical events"}
+  GPU.POWER.CABLE: {severity: crit, cause: platform, triage: check_gpu_power_cables, desc: "GPU power cables connected incorrectly"}
 
 message_ids:
-  CPU0000: {concept: CPU.IERR.CATERR,      text: "CPU <n> has an internal error (IERR)",
-            ref: "Dell community thread 'CPU1 CPU0000 Internal error (IERR)'; Dell KB 000137438 (text)"}
-  CPU0704: {concept: CPU.MCE.LOGGED,       text: "CPU <n> machine check error detected",
-            ref: "Dell KB 000014771 (PowerFlex dial-home alerts)"}
-  MEM0001: {concept: MEM.ECC.UNCORR,       text: "Multi-bit memory errors detected on a memory device at location(s) <DIMM>",
-            ref: "Dell KB 000014771"}
-  MEM0702: {concept: MEM.ECC.CORR,         text: "Correctable memory error rate exceeded for <DIMM>",
-            ref: "Dell KB 000014771"}
-  PSU0003: {concept: PSU.INPUT.LOST,       text: "The power input for power supply <n> is lost",
-            ref: "Dell KB 000014771"}
-  RDU0012: {concept: PSU.REDUNDANCY.LOST,  text: "Lost PSU redundancy (front panel: RDU0012 LOST PSU REDUNDANCY CHECK PSU CABLES)",
-            ref: "One Identity KB 4257127 (Dell-based appliance front panel)"}
-  FAN0001: {concept: FAN.FAIL,             text: "Fan <n> RPM is less than the lower critical threshold",
-            ref: "Dell KB 000014771"}
-  TMP0104: {concept: THERMAL.OUT_OF_RANGE, text: "The system board <name> temperature is outside of range",
-            ref: "Dell KB 000014771"}
-  VLT0204: {concept: VOLT.OUT_OF_RANGE,    text: "The system board <name> voltage is outside of range",
-            ref: "Dell KB 000014771"}
-  NIC100:  {concept: NET.LINK.DOWN,        text: "The <controller> Port <n> network link is down",
-            ref: "Dell KB 000011815 (VxRail event VXR508NIC100)"}
-  PDR16:   {concept: DISK.PREDICTIVE_FAIL, text: "Predictive failure reported for <physical disk>",
-            ref: "Dell KB 000011810 (VxRail event VXR508PDR16), KB 000308774"}
-
-# Dell PCIe fatal messages already reach PCIE.FATAL by the word road ("bus" and "fatal"), with no ID:
-#   "A bus fatal error was detected on a component at slot 5"                 (Dell KB 000137619)
-#   "A fatal error was detected on a component at bus 2 device 0 function 0"  (Red Hat 7062084)
-
-gaps:
-  - "PCIe fatal error message ID (candidates seen in AI answers, not confirmed: PCI1302, PCI0018)"
-  - "GPU-specific iDRAC messages for XE9680 / XE8640 (H100, H200) systems"
-  - "PST0119, STOR0182, PDR0001, CPU0005, PSU0006: named in an AI answer, no public source found"
+  CPU0001: {concept: CPU.THERMTRIP, dell_severity: Critical, text: "CPU arg1 has a thermal trip (over-temperature) event."}
+  CPU0002: {concept: CPU.INIT.FAIL, dell_severity: Critical, text: "CPU arg1 has failed the built-in self-test (BIST)."}
+  CPU0003: {concept: CPU.INIT.FAIL, dell_severity: Critical, text: "CPU arg1 is stuck in POST."}
+  CPU0004: {concept: CPU.INIT.FAIL, dell_severity: Critical, text: "CPU arg1 failed to initialize."}
+  CPU0700: {concept: CPU.INIT.FAIL, dell_severity: Critical, text: "CPU arg1 initialization error detected."}
+  CPU0701: {concept: CPU.MCE.LOGGED, dell_severity: Critical, text: "CPU arg1 protocol error detected."}
+  CPU0702: {concept: CPU.MCE.LOGGED, dell_severity: Critical, text: "CPU bus parity error detected."}
+  CPU0703: {concept: CPU.MCE.LOGGED, dell_severity: Critical, text: "CPU bus initialization error detected."}
+  CPU0704: {concept: CPU.MCE.LOGGED, dell_severity: Critical, text: "CPU arg1 machine check error detected."}
+  CPU0010: {concept: CPU.THROTTLE, dell_severity: Warning, text: "CPU arg1 is throttled."}
+  CPU9002: {concept: CPU.LINK.DEGRADED, dell_severity: Warning, text: "A link width degradation has occurred in the CPU interconnect arg1."}
+  MEM0001: {concept: MEM.ECC.UNCORR, dell_severity: Critical, text: "Multi-bit memory errors are detected on the memory device at location(s) arg1. Immediately replace the DIMM."}
+  MEM0002: {concept: MEM.ECC.UNCORR, dell_severity: Critical, text: "Parity memory errors detected on a memory device at location arg1."}
+  MEM0003: {concept: MEM.DIMM.FAIL, dell_severity: Critical, text: "Stuck bit memory error detected on a memory device at location arg1."}
+  MEM0004: {concept: MEM.DIMM.FAIL, dell_severity: Critical, text: "Memory device at location arg1 is disabled."}
+  MEM0005: {concept: MEM.ECC.CORR_LIMIT, dell_severity: Critical, text: "Persistent correctable memory error limit reached for a memory device at location(s) arg1."}
+  MEM8000: {concept: MEM.ECC.CORR_LIMIT, dell_severity: Critical, text: "Correctable memory error logging disabled for a memory device at location arg1."}
+  MEM0701: {concept: MEM.ECC.CORR, dell_severity: Informational, text: "Correctable memory errors detected for arg1."}
+  MEM0702: {concept: MEM.ECC.CORR, dell_severity: Warning, text: "Correctable memory errors detected for arg1."}
+  MEM0007: {concept: MEM.CONFIG.ERROR, dell_severity: Critical, text: "Unsupported memory configuration; check memory device at location arg1."}
+  PCI1302: {concept: PCIE.TIMEOUT, dell_severity: Critical, text: "A bus time-out was detected on a component at bus arg1 device arg2 function arg3."}
+  PCI1342: {concept: PCIE.TIMEOUT, dell_severity: Critical, text: "A bus time-out was detected on a component at slot arg1."}
+  PCI1308: {concept: PCIE.FATAL, dell_severity: Critical, text: "A PCI parity error was detected on a component at bus arg1 device arg2 function arg3."}
+  PCI1348: {concept: PCIE.FATAL, dell_severity: Critical, text: "A PCI parity error was detected on a component at slot arg1."}
+  PCI1310: {concept: PCIE.FATAL, dell_severity: Critical, text: "A PCI system error was detected on a component at bus arg1 device arg2 function arg3."}
+  PCI1350: {concept: PCIE.FATAL, dell_severity: Critical, text: "A PCI system error was detected on a component at slot arg1."}
+  PCI1314: {concept: PCIE.CORR, dell_severity: Critical, text: "A bus correctable error was detected on a component at bus arg1 device arg2 function arg3."}
+  PCI1354: {concept: PCIE.CORR, dell_severity: Critical, text: "A bus correctable error was detected on a component at slot arg1."}
+  PCI1316: {concept: PCIE.UNCORR.NONFATAL, dell_severity: Critical, text: "A bus uncorrectable error was detected on a component at bus arg1 device arg2 function arg3."}
+  PCI1356: {concept: PCIE.UNCORR.NONFATAL, dell_severity: Critical, text: "A bus uncorrectable error was detected on a component at slot arg1."}
+  PCI1318: {concept: PCIE.FATAL, dell_severity: Critical, text: "A fatal error was detected on a component at bus arg1 device arg2 function arg3."}
+  PCI1358: {concept: PCIE.FATAL, dell_severity: Critical, text: "A fatal error was detected on a component at slot arg1."}
+  PCI1320: {concept: PCIE.FATAL, dell_severity: Critical, text: "A bus fatal error was detected on a component at bus arg1 device arg2 function arg3."}
+  PCI1360: {concept: PCIE.FATAL, dell_severity: Critical, text: "A bus fatal error was detected on a component at slot arg1."}
+  PCI1363: {concept: PCIE.FATAL, dell_severity: Critical, text: "PCIe FATAL error in arg1."}
+  PCI2000: {concept: PCIE.FATAL, dell_severity: Critical, text: "A fatal IO error detected on a component at bus arg1 device arg2 function arg3."}
+  PCI2002: {concept: PCIE.FATAL, dell_severity: Critical, text: "A fatal IO error detected on a component at slot arg1."}
+  PCI2004: {concept: PCIE.FATAL, dell_severity: Critical, text: "The Watchdog timeout event occurred on the PCIe link with segment: arg1, bus: arg2, device: arg3, and function: arg4."}
+  PCI1322: {concept: LINK.DEGRADED, dell_severity: Warning, text: "Bus performance degraded for a component at bus arg1 device arg2 function arg3."}
+  PCI1362: {concept: LINK.DEGRADED, dell_severity: Warning, text: "Bus performance degraded for a component at slot arg1."}
+  UEFI0031: {concept: LINK.DEGRADED, dell_severity: Critical, text: "PCIe downtrain is detected on arg1. Expected link width: arg2 Actual link width: arg3."}
+  UEFI0080: {concept: LINK.DEGRADED, dell_severity: Warning, text: "PCIe link speed is not optimal for arg1. Expected link speed: Gen arg2 and actual link speed: Gen arg3."}
+  UEFI0066: {concept: PCIE.LINK.DOWN, dell_severity: Critical, text: "A PCIe link training failure is observed in arg1 and the link is disabled. The system has halted."}
+  UEFI0067: {concept: PCIE.LINK.DOWN, dell_severity: Critical, text: "A PCIe link training failure is observed in arg1 and device link is disabled."}
+  PSU0001: {concept: PSU.FAIL, dell_severity: Critical, text: "Power supply arg1 failed."}
+  PSU0034: {concept: PSU.FAIL, dell_severity: Critical, text: "An under voltage fault detected on power supply arg1."}
+  PSU0036: {concept: PSU.FAIL, dell_severity: Critical, text: "An over current fault detected on power supply arg1."}
+  PSU0002: {concept: PSU.PREDICTIVE_FAIL, dell_severity: Warning, text: "A predictive failure detected on power supply arg1."}
+  PSU0003: {concept: PSU.INPUT.LOST, dell_severity: Critical, text: "The Power Supply Unit (PSU) arg1 is not receiving input power because of issues in PSU or cable connections."}
+  RDU0012: {concept: PSU.REDUNDANCY.LOST, dell_severity: Critical, text: "Power supply redundancy is lost."}
+  FAN0001: {concept: FAN.FAIL, dell_severity: Critical, text: "Fan arg1 RPM is less than the lower critical threshold."}
+  TMP0104: {concept: THERMAL.OUT_OF_RANGE, dell_severity: Critical, text: "The system board arg1 temperature is outside of range."}
+  VLT0204: {concept: VOLT.OUT_OF_RANGE, dell_severity: Critical, text: "The system board arg1 voltage is outside of range."}
+  NIC100: {concept: NET.LINK.DOWN, dell_severity: Warning, text: "The arg1 Port arg2 network link is down."}
+  PDR16: {concept: DISK.PREDICTIVE_FAIL, dell_severity: Warning, text: "Predictive failure reported for arg1. Part Number = arg2"}
+  OSE0001: {concept: OS.KERNEL.PANIC, dell_severity: Informational, text: "The system stopped responding because of an exception while running the operating system."}
+  OSE1001: {concept: OS.BOOT.FAIL, dell_severity: Critical, text: "Failed to boot from A."}
+  OSE1003: {concept: OS.BOOT.FAIL, dell_severity: Critical, text: "Failed to boot from C."}
+  GPU0001: {concept: GPU.THERMAL.CRIT, dell_severity: Critical, text: "GPU_arg1 temperature arg2 above Upper Critical Temperature arg3."}
+  TMP0306: {concept: GPU.THERMAL.CRIT, dell_severity: Critical, text: "System GPU baseboard detected an over temperature condition."}
+  TMP0401: {concept: GPU.THERMAL.CRIT, dell_severity: Critical, text: "The TLimit temperature of the GPU has reached the critical threshold. A server shutdown operation is initiated."}
+  TMP0402: {concept: GPU.THERMAL.THROTTLE, dell_severity: Warning, text: "The TLimit temperature of the GPU has reached the warning threshold. Performance may be impacted."}
+  PWR2306: {concept: POWER.THROTTLE, dell_severity: Warning, text: "The Graphics Processing Unit (GPU) in the slot arg1 is unable to maintain the power limit."}
+  HWC9051: {concept: GPU.MEM.HEALTH.WARN, dell_severity: Warning, text: "The health of Graphics Processing Unit (GPU) device arg1 is degraded because of single or double bit errors on the memory cells."}
+  HWC9052: {concept: GPU.MEM.HEALTH.CRIT, dell_severity: Critical, text: "The health of Graphics Processing Unit (GPU) device arg1 is critical because of single or double bit errors on the memory cells."}
+  HWC9056: {concept: GPU.CONFIG.MISMATCH, dell_severity: Warning, text: "A mismatch of GPU models is detected on the server which might result in suboptimal performance."}
+  ACC0001: {concept: GPU.BASEBOARD.CRIT_LOG, dell_severity: Critical, text: "The Graphic Processing Unit (GPU) baseboard has saved log data related to critical events."}
+  ACC0002: {concept: GPU.CONFIG.MISMATCH, dell_severity: Warning, text: "The Graphics Processing Unit (GPU) Baseboard has detected arg1 GPUs that are incorrectly located. The GPUs located in slots arg2 must be relocated."}
+  UEFI0282: {concept: GPU.POWER.CABLE, dell_severity: Critical, text: "One or more graphics processing unit (GPU) adapters are not operating correctly because the power cables between the GPU adapters and arg1 are incorrectly connected."}
