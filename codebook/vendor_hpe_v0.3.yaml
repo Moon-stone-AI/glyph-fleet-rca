@@ -12,7 +12,8 @@
 #   the fatal CPU event that IPMI BMCs log as CATERR/IERR.
 # - PCIe uncorrectable errors carry an explicit hex address (Segment 0x.., Bus 0x.., Device 0x.., Function 0x..),
 #   which the encoder turns into a bdf.
-# - This Gen10 guide has no GPU-specific IML messages; Gen11 and GPU platforms (e.g. XD670, XD685) need their own.
+# - Neither the Gen10 nor the Gen11 guide has GPU-specific IML messages; HPE GPU platforms (e.g. Cray XD670)
+#   need their own source.
 
 version: "0.3.0-hpe"
 
@@ -47,3 +48,30 @@ text_templates:
   - {hpe: "0011/0008", concept: NET.LINK.DOWN, template: "Network adapter link down on slot %1, port %2."}
   - {hpe: "0011/0009", concept: NET.LINK.DOWN, template: "Network adapter link down (Chassis %1, Slot %2, Port %3)"}
   - {hpe: "000A/1716", concept: DISK.FAIL, template: "Unrecoverable media errors detected on drives."}
+  - {hpe: "0008/0007", gen: 11, concept: PCIE.UNCORR.NONFATAL, template: "PCI Express Uncorrectable Error Detected (Processor: %1, Segment: %2, Bus: %3, Device: %4, Function: %5, AER Uncorrectable Error Status: %6, Overflow: %7, Slot ID: %8, Slot: %9)"}
+  - {hpe: "0008/000A", gen: 11, concept: PCIE.UNCORR.NONFATAL, template: "Uncorrectable PCI express error detected. OCP Slot %1 (Segment 0x%2, Bus 0x%3, Device 0x%4, Function 0x%5). Uncorrectable error status: 0x%6"}
+  - {hpe: "0008/000B", gen: 11, concept: PCIE.UNCORR.NONFATAL, template: "Uncorrectable PCI express error detected. OCP Slot %1 (Segment 0x%2, Bus 0x%3, Device 0x%4, Function 0x%5)."}
+  - {hpe: "0008/0005", gen: 11, concept: PCIE.UNCORR.NONFATAL, template: "Uncorrectable PCI Express Error detected: NVMe Box %1 Bay %2 (Segment 0x%3, Bus 0x%4, Device 0x%5, Function 0x%6)."}
+  - {hpe: "0008/0006", gen: 11, concept: PCIE.CORR, template: "PCI Express Correctable error detected"}
+  - {hpe: "0032/3020", gen: 11, concept: LINK.DEGRADED, template: "PCIe Slot %1 failed to train at Gen %2 speed and x%3 width"}
+  - {hpe: "0032/3024", gen: 11, concept: LINK.DEGRADED, template: "FlexibleLOM %1 failed to train at Gen %2 speed and x%3 width"}
+  - {hpe: "0032/3021", gen: 11, concept: PCIE.LINK.DOWN, template: "PCIe Slot %1 failed to train"}
+  - {hpe: "0032/3022", gen: 11, concept: PCIE.LINK.DOWN, template: "PCIe Slot %1 failed to train or no device detected on a bifurcated slot."}
+  - {hpe: "000A/31CB", gen: 11, concept: PCIE.FATAL, template: "PCIe Enhanced Downstream Port Containment (EDPC) Event detected on Slot %1. EDPC Status: 0x%2."}
+  - {hpe: "000A/31EA", gen: 11, concept: PCIE.FATAL, template: "PCIe Error Disconnect Recover (EDR) failed on Slot %1"}
+  - {hpe: "0003/0002", gen: 11, concept: MEM.ECC.UNCORR, template: "An uncorrectable memory error detected (Processor: %1, MCU: %2, DIMM: %3, Error Status: %4, Error Address Low: %5, Error Address High: %6, Overflow: %7)"}
+  - {hpe: "0003/0007", gen: 11, concept: MEM.ECC.UNCORR, template: "An uncorrectable memory error detected (Processor: %1, Error Component: %2, MCU: %3, Error Status: %4, Error Address Low: %5, Error Address High: %6, Overflow: %7)"}
+  - {hpe: "0003/000B", gen: 11, concept: MEM.ECC.UNCORR, template: "An uncorrectable memory error detected (Address: 0x%1%2, Module: 0x%3, Bank: 0x%4, Error type: %5%6)"}
+  - {hpe: "000A/31D1", gen: 11, concept: MEM.ECC.UNCORR, template: "High Bandwidth Memory (HBM) failure - uncorrectable memory error (processor %1)"}
+  - {hpe: "0003/0001", gen: 11, concept: MEM.ECC.CORR, template: "Correctable Memory Error detected (Processor %1)"}
+  - {hpe: "0032/544F", gen: 11, concept: MEM.DIMM.FAIL, template: "Uncorrectable memory error threshold exceeded (%1 %2, DIMM %3). The DIMMs on the same memory channel are mapped out and are currently not available."}
+  - {hpe: "0005/0011", gen: 11, concept: CPU.IERR.CATERR, template: "Uncorrectable Processor Error detected (Processor: %1, Error Component: %2, Cluster Processor Module: %3, Error Status: %4, Error Address Low: %5, Error Address High: %6, Overflow: %7)"}
+  - {hpe: "0005/0019", gen: 11, concept: CPU.IERR.CATERR, template: "An uncorrectable processor error detected (Processor: %1, Error Type: %2, Error count: %3%4)"}
+  - {hpe: "0005/0013", gen: 11, concept: CPU.IERR.CATERR, template: "Fatal error detected - %1 - Recovery: %2"}
+  - {hpe: "0005/000A", gen: 11, concept: OS.KERNEL.PANIC, template: "Processor %1 encountered a Critical Stop due to OS crash or CPU freeze"}
+  - {hpe: "0005/0007", gen: 11, concept: CPU.THROTTLE, template: "CPU Throttling Triggered, CPU may be operating at a reduced performance."}
+  - {hpe: "0005/0012", gen: 11, concept: CPU.THROTTLE, template: "CPU throttling detected: reduced CPU Performance"}
+  - {hpe: "0005/0016", gen: 11, concept: CPU.THROTTLE, template: "CPU throttling detected, CPU may be operating at reduced performance."}
+  - {hpe: "0002/002B", gen: 11, concept: THERMAL.CRIT, template: "The system is overheating due to fan issues."}
+  - {hpe: "0034/0001", gen: 11, concept: PSU.FAIL, template: "Power supply %1 has exceeded the current limit. Power supply output will be disabled."}
+  - {hpe: "0011/000D", gen: 11, concept: NET.LINK.DOWN, template: "All links are down in adapter %1 in slot %2"}
