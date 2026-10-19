@@ -142,6 +142,23 @@ From a queue to knowledge, the way a practitioner works:
 3. A practitioner reviews it, gives it a fault code and the fix, and adds it to `codebook/fault_library.yaml`.
 4. From then on, matching nodes are labelled with the known pattern and its fix in every report. Drafts never label nodes.
 
+### v0.5: collect from your own servers
+
+For a handful of servers, debugging and triage start from one script. `tools/glyph-collect.sh` runs on each Linux GPU server, **reads only**, installs nothing and sends nothing: it writes one `.tar.gz` that you inspect before it goes anywhere.
+
+```bash
+sudo ./tools/glyph-collect.sh               # kernel log (30 days), ipmitool SEL, nvidia-smi -q, PCIe links from sysfs
+sudo ./tools/glyph-collect.sh --diag 2      # also DCGM diagnostics: loads the GPUs, idle and drained nodes only
+python -m glyphrca ingest glyph-collect-*.tar.gz --out fleet/
+python -m glyphrca analyze fleet/ --health-csv health.csv --buckets-csv queues.csv
+```
+
+- **Redacted by default**: the hostname becomes `node-<hash>`, IPv4 and MAC addresses and serial numbers are masked. GPU UUIDs stay, because they carry a card's history. `--no-redact` keeps everything.
+- Vendor BMC logs (iDRAC Lifecycle Log, XCC event log, HPE IML) need an export from the BMC page into the archive's `bmc/` folder; they are read with the v0.3 vendor codebooks.
+- `nvidia-smi -q` adds what the card itself remembers: uncorrectable remapped rows, pending remaps, remap failure and banks low on spare rows. One incident is counted once: if the kernel log already holds Xid 63 or 64 for that GPU, the snapshot of the same fact is not added.
+- On one or a few servers you get per-node triage, the GPU health index, work queues and each node's timeline. Survivor search, firmware correlation and pattern mining need a fleet.
+- The DCGM diagnostics reader is **experimental**: it was built without a real customer sample yet. If it recognises nothing, it says so.
+
 ### PCIe tree as a map
 Bus numbers differ between servers; slot paths (`RP1/SW1/GPU5`) do not. The most common tree shape is the golden tree. Errors carrying a BDF are mapped onto it:
 - errors on two or more devices behind the same switch, on several servers → **suspect the switch or riser**, not the GPUs;
@@ -162,7 +179,7 @@ python -m glyphrca synth fleet_demo --bad 500 --ok 200      # writes a synthetic
 python -m glyphrca analyze fleet_demo                        # the report
 python -m glyphrca analyze fleet_demo --json report.json \
        --tier2-key "your-secret" --public public.json --private private_codebook.json
-python -m unittest discover -s tests -v                      # 38 tests
+python -m pytest tests                                      # 65 tests
 ```
 
 ### Input layout
@@ -193,6 +210,8 @@ glyphrca/fleet.py        L3 runs, L4 signatures, survivors, inventory join, simu
 glyphrca/pcie.py         PCIe tree: golden shape, missing/degraded devices, switch vs device attribution,
                          bus-loss witnesses across SEL, kernel and tree
 glyphrca/tier2.py        opaque tokens and private codebook
+glyphrca/ingest.py       glyph-collect archives -> fleet directory (v0.5)
+tools/glyph-collect.sh   read-only collector for one Linux GPU server (v0.5)
 glyphrca/report.py       pipeline, size accounting, text report
 glyphrca/synth.py        synthetic fleet generator (all scenarios above)
 tests/                   unit and end-to-end tests
@@ -211,7 +230,8 @@ tests/                   unit and end-to-end tests
 - ~~v0.2 Linux kernel and NVIDIA Xid~~ (done)
 - ~~v0.3 vendor codebooks: Dell iDRAC, Lenovo XCC, HPE iLO~~ (done); next: Supermicro, full Intel tables, AMD
 - agent (beyond log analysis): job-aware blast radius (requeue the whole multi-node job through Slurm, Volcano or Ray, not just drain one node); NVLink state polling for degraded links; health-query watchdog for baseboard management hangs; ghost GPU contexts after container crashes; scheduling pre-flight diagnostics on drained nodes
-- v0.4 Windows Event Log in several languages: one glyph whatever the language
+- ~~v0.5 collector for small fleets~~ (done); next: a real `dcgmi diag -j` sample, Redfish export of BMC logs
+- Windows Event Log in several languages: one glyph whatever the language
 - later: rate-based states (a burst vs. a slow leak), interactive fleet view
 
 ## Acknowledgements

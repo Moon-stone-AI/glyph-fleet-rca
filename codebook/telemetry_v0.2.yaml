@@ -39,7 +39,7 @@ metrics:
   - {glyph: GPU.MEM.REMAP.FAIL, kind: gauge, value_above: 0,
      names: [DCGM_FI_DEV_ROW_REMAP_FAILURE, DCGM_FI_DEV_ROW_REMAP_FAILED]}
   - {glyph: GPU.MEM.REMAP.EVENT, kind: gauge, value_above: 0,
-     names: [DCGM_FI_DEV_ROW_REMAP_PENDING]}
+     names: [DCGM_FI_DEV_ROW_REMAP_PENDING, DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS]}  # v0.5: also the nvidia-smi snapshot via ingest
   - {glyph: GPU.MEM.REMAP.LOW_SPARE, kind: gauge, value_above: 0,
      names: [DCGM_FI_DEV_BANK_REMAP_AVAIL_LOW]}
   - {glyph: GPU.MEM.REMAP.NO_SPARE, kind: gauge, value_above: 0,

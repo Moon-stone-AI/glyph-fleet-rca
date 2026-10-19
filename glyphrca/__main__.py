@@ -38,7 +38,17 @@ def main(argv=None):
     pt.add_argument("fleet")
     pt.add_argument("--bucket", required=True, help="queue name, e.g. gpu_memory (see the work-queue report)")
     pt.add_argument("--out", default="draft_records.yaml")
+    ig = sub.add_parser("ingest", help="turn glyph-collect archives (or unpacked folders) into a fleet directory")
+    ig.add_argument("archives", nargs="+")
+    ig.add_argument("--out", required=True, help="fleet directory to create or add to")
     args = p.parse_args(argv)
+
+    if args.cmd == "ingest":
+        from .ingest import ingest
+        for s in ingest(args.archives, args.out):
+            print(f"{s['host']}: ingested" + "".join(f"\n  note: {n}" for n in s["notes"]))
+        print(f"Fleet directory ready: {args.out}  ->  python -m glyphrca analyze {args.out}")
+        return 0
 
     if args.cmd == "synth":
         truth = generate(args.out, bad=args.bad, ok=args.ok, flood=tuple(args.flood), seed=args.seed)

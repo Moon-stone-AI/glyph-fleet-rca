@@ -39,6 +39,7 @@ sel_binary:
   - {st: 0x13, sn: 0x05, offset: null, concept: PCIE.CORR,       args: pcie_bdf,    ref: "Table 85"}
   - {st: 0x20, sn: null, offset: 0x1,  concept: OS.KERNEL.PANIC, args: none,        ref: "Table 136 (GID 0021h)"}
   - {st: 0x08, sn: null, offset: 0x1,  concept: PSU.FAIL,        args: none,        ref: "IPMI sensor type 08h offset 1"}
+  - {st: 0x08, sn: null, offset: 0x3,  concept: PSU.INPUT.LOST,  args: none,        ref: "IPMI sensor type 08h offset 3: input lost (AC/DC)"}
   - {st: 0x01, sn: null, offset: null, concept: THERMAL.CRIT,    args: none,        ref: "Threshold temperature sensors"}
 
 # ---------------------------------------------------------------- road 2: text dialects
@@ -73,6 +74,7 @@ lexicon:
   FATAL: [fatal]
   KERNEL: [kernel]
   PSU: [supply, psu]
+  INPUT: [input, ac]   # v0.5: ipmitool "Power Supply AC lost"
   POWER: [power, server]
   THERMTRIP: [thermtrip, trip]
   META: [record, date, time, severity, description, interrupt, asserted, sensor, slot, segment, port, bank, status, event, socket, channel, device, component]
@@ -91,6 +93,7 @@ phrases:
   - {concept: PCIE.CORR,       any_of: [[PCIE, CORR]]}
   - {concept: NET.LINK.DOWN,   any_of: [[NET, DOWN], [LINK, DOWN]]}
   - {concept: PSU.FAIL,        any_of: [[POWER, PSU, STOP], [PSU, STOP]]}
+  - {concept: PSU.INPUT.LOST,  any_of: [[PSU, INPUT, DOWN]]}   # v0.5; concept in vendor_common
   - {concept: THERMAL.CRIT,    any_of: [[TEMP, CRIT, HIGH]]}
   - {concept: THERMAL.OK,      any_of: [[TEMP, OK], [TEMP, NONCRIT]]}
   - {concept: SYS.BOOT,        any_of: [[BOOT]]}
