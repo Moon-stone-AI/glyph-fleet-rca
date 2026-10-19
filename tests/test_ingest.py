@@ -158,3 +158,21 @@ def test_unsafe_archive_rejected(tmp_path):
         assert "unsafe" in str(e)
     else:
         raise AssertionError("path traversal not caught")
+
+
+def test_xid64_is_a_recording_failure_not_exhausted_spares(tmp_path):
+    """Xid 64 = the remap could not be written to the InfoROM (reboot; RMA if it repeats).
+    Spare rows used up is the separate row-remapping failure flag."""
+    src = tmp_path / "src"
+    d = _node(src, "node-c")
+    (d / "kernel.log").write_text(
+        "2026-10-18T03:14:15+0000 node kernel: NVRM: Xid (PCI:0000:18:00): 48, pid=1, name=python, DBE\n"
+        "2026-10-18T03:14:16+0000 node kernel: NVRM: Xid (PCI:0000:18:00): 64, pid=1, name=python, "
+        "Row remapper recording failure.\n")
+    fleet = tmp_path / "fleet"
+    ingest([str(d)], str(fleet))
+    r = analyse_fleet(str(fleet))
+    g = next(x for x in r["gpu_health"] if x["bdf"] == "0000:18:00.0")
+    assert "GPU.MEM.REMAP.RECORD_FAIL" in g["evidence"]
+    assert 10 < g["score"] <= 74                      # one uncorrectable incident: caution, not "do not sell"
+    assert not any("exhausted" in v or "used up" in v for v in g["verdicts"])

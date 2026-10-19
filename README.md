@@ -179,7 +179,7 @@ python -m glyphrca synth fleet_demo --bad 500 --ok 200      # writes a synthetic
 python -m glyphrca analyze fleet_demo                        # the report
 python -m glyphrca analyze fleet_demo --json report.json \
        --tier2-key "your-secret" --public public.json --private private_codebook.json
-python -m pytest tests                                      # 65 tests
+python -m pytest tests                                      # 66 tests
 ```
 
 ### Input layout

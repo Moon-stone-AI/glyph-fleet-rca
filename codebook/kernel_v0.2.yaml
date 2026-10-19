@@ -26,8 +26,10 @@ concepts:
   GPU.MEM.REMAP.EVENT:     {severity: warn, cause: hardware,  triage: reset_gpu_when_idle, deadline_h: 12, then: drain_and_cordon,
                             desc: "ECC page retirement or row remapping recording event (Xid 63)",
                             note: "Long training or inference jobs never leave the GPU idle: reset when idle, but no later than the deadline; then drain the node"}
-  GPU.MEM.REMAP.FAIL:      {severity: crit, cause: hardware,  triage: drain_and_cordon_then_rma, desc: "ECC page retirement or row remapper recording failure (Xid 64)",
-                            note: "Spare rows are used up: take the node out of the scheduler at once and for good, then RMA; an alert alone lets user jobs keep landing on it"}
+  GPU.MEM.REMAP.RECORD_FAIL: {severity: crit, cause: hardware, triage: drain_and_reboot, desc: "Row remapping recording failure (Xid 64)",
+                            note: "The GPU could not record the damaged memory rows in its InfoROM. Reboot the node (drain first). If the error repeats, the InfoROM may be physically defective: RMA. Usually follows Xid 48; this is not the same as spare rows running out"}
+  GPU.MEM.REMAP.FAIL:      {severity: crit, cause: hardware,  triage: drain_and_cordon_then_rma, desc: "Row-remapping failure flag: remapping capacity used up",
+                            note: "Set when an uncorrectable error hits a bank that already has eight remapped rows, hits a row already remapped, or after 512 remappings in total (nvidia-smi: Remapping Failure Occurred). NVIDIA's RMA criterion once confirmed by the field diagnostic. Take the node out of the scheduler for good"}
   GPU.CTRL.GSP:            {severity: crit, cause: driver_or_hw, triage: reset_gpu_then_watch, desc: "GSP RPC timeout / GSP error (Xid 119, 120)",
                             note: "Try an in-band GPU reset first. If it comes back and does not recur, treat as transient or driver; repeated on one GPU means hardware (see escalation); on many servers at once after a driver change means the driver. GSP firmware is optional on A100 in many driver branches and required on Hopper; check the driver release notes. NVIDIA's catalog lists hardware, driver, memory, bus, thermal and framebuffer causes for Xid 119/120, not user applications"}
   GPU.UCODE.HALT:          {severity: crit, cause: hardware,  triage: reset_gpu_now,    desc: "Internal micro-controller halt (Xid 62)"}
@@ -62,6 +64,7 @@ escalation:
   - {concept: GPU.MEM.ECC.CONTAINED, max_per_day: 3, to: drain_and_cordon_and_diagnose}
   - {concept: GPU.MEM.REMAP.EVENT,   max_per_day: 3, to: drain_and_cordon_and_diagnose}
   - {concept: GPU.CTRL.GSP,          max_per_day: 1, to: drain_and_cordon_and_diagnose}
+  - {concept: GPU.MEM.REMAP.RECORD_FAIL, max_per_day: 1, to: drain_and_cordon_check_inforom_then_rma}   # Vitali de Mille, 19 Oct 2026
 
 # AER storm: this many PCIe AER messages from one server inside the window -> isolate the node.
 aer_storm: {per_window: 1000, window_s: 60}
@@ -79,7 +82,7 @@ xid:
   61: GPU.UCODE.WARN
   62: GPU.UCODE.HALT
   63: GPU.MEM.REMAP.EVENT
-  64: GPU.MEM.REMAP.FAIL
+  64: GPU.MEM.REMAP.RECORD_FAIL
   68: GPU.EXEC.EXCEPTION
   69: GPU.EXEC.EXCEPTION
   74: LINK.NVLINK.ERROR

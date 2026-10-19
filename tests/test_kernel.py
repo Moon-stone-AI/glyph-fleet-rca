@@ -28,7 +28,7 @@ class KernelRoad(unittest.TestCase):
     def test_xid_table_follows_nvidia_catalog(self):
         cases = {79: "GPU.BUS.LOST", 48: "GPU.MEM.ECC.DBE", 94: "GPU.MEM.ECC.CONTAINED",
                  95: "GPU.MEM.ECC.UNCONTAINED", 92: "GPU.MEM.ECC.SBE_RATE", 63: "GPU.MEM.REMAP.EVENT",
-                 64: "GPU.MEM.REMAP.FAIL", 74: "LINK.NVLINK.ERROR", 119: "GPU.CTRL.GSP", 120: "GPU.CTRL.GSP",
+                 64: "GPU.MEM.REMAP.RECORD_FAIL", 74: "LINK.NVLINK.ERROR", 119: "GPU.CTRL.GSP", 120: "GPU.CTRL.GSP",
                  13: "GPU.EXEC.EXCEPTION", 31: "GPU.EXEC.EXCEPTION", 45: "GPU.DRIVER.CLEANUP"}
         for code, concept in cases.items():
             for prefix, form in ((DMESG, "PCI:0000:41:00"), (JOURNAL, "0000:41:00")):
@@ -121,6 +121,7 @@ class FleetV02(unittest.TestCase):
         cb = Codebook.load()
         self.assertEqual(cb.triage("GPU.MEM.ECC.UNCONTAINED"), "pcie_reset_or_reboot")
         self.assertEqual(cb.triage("GPU.MEM.REMAP.FAIL"), "drain_and_cordon_then_rma")
+        self.assertEqual(cb.triage("GPU.MEM.REMAP.RECORD_FAIL"), "drain_and_reboot")
         self.assertEqual(cb.triage("GPU.EXEC.EXCEPTION"), "return_logs_to_user")
         self.assertEqual(cb.concepts["GPU.MEM.REMAP.EVENT"]["deadline_h"], 12)
 

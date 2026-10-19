@@ -28,6 +28,7 @@ penalties:
   GPU.MEM.ECC.SBE_RATE:    {component: memory,      points: 5,  count: once}
   GPU.MEM.REMAP.EVENT:     {component: memory,      points: 4,  count: each,    max: 16}
   GPU.MEM.REMAP.LOW_SPARE: {component: memory,      points: 15, count: once}
+  GPU.MEM.REMAP.RECORD_FAIL: {component: memory,    points: 8,  count: each,    max: 16}   # Xid 64, 19 Oct 2026
   GPU.BUS.LOST:            {component: severe_xid,  points: 8,  count: each,    max: 24}
   GPU.MEM.ECC.UNCONTAINED: {component: severe_xid,  points: 8,  count: each,    max: 24}
   GPU.CTRL.GSP:            {component: severe_xid,  points: 8,  count: each,    max: 24}
@@ -53,7 +54,7 @@ age:
 
 # hard caps: if the concept is present, the score cannot be higher than this
 caps:
-  GPU.MEM.REMAP.FAIL:      {max_score: 10, verdict: "RMA, not for sale: spare rows exhausted"}
+  GPU.MEM.REMAP.FAIL:      {max_score: 10, verdict: "RMA, not for sale: row-remapping failure flag (remapping capacity used up; confirm with the NVIDIA field diagnostic)"}
   GPU.SDC:                 {max_score: 10, verdict: "RMA, not for sale: failed matrix-math diagnostic"}
   GPU.MEM.REMAP.NO_SPARE:  {max_score: 30, verdict: "memory banks with no spare rows left"}
 
@@ -62,7 +63,7 @@ caps:
 # so the group counts the largest concept count, not the sum.
 group_caps:
   - name: uncorrectable_memory
-    concepts: [GPU.MEM.ECC.DBE, GPU.MEM.REMAP.EVENT]
+    concepts: [GPU.MEM.ECC.DBE, GPU.MEM.REMAP.EVENT, GPU.MEM.REMAP.RECORD_FAIL]
     steps:
       - {min_count: 1, max_score: 74, verdict: "uncorrectable memory error (Xid 48 or row remap): sell only with disclosure"}
       - {min_count: 2, max_score: 49, verdict: "repeated uncorrectable memory errors: not for sale"}

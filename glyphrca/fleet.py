@@ -242,7 +242,9 @@ def lemon_nodes(fv: "FleetView", cb: Codebook, exclude: set[str], min_kinds: int
         if h in exclude:
             continue
         kinds = sorted({r.concept for r in rs if cb.cause(r.concept) == "hardware"})
-        if len(kinds) >= min_kinds:
+        # count failure kinds, not concepts: one memory incident (Xid 48, 63, 64, the remap flag) is one kind
+        families = {".".join(c.split(".")[:2]) if c.startswith("GPU.") else c.split(".")[0] for c in kinds}
+        if len(families) >= min_kinds:
             out[h] = kinds
     return out
 

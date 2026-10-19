@@ -310,6 +310,13 @@ def generate(out: str | Path, bad=500, ok=200, flood=(30, 80), switch_fault=8, g
         if h in remapfail_hosts:
             k.xid(t0 + 9000, where["GPU2"], 63, "Row remapping event.")
             k.xid(t0 + 9100, where["GPU2"], 64, "Row remapper recording failure.")
+            if telemetry:  # the row-remapping failure flag itself, as nvidia-smi/DCGM report it
+                ts_f = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 + 9200))
+                (out / h).mkdir(exist_ok=True)
+                f = out / h / "dcgm.csv"
+                head = "" if f.exists() else "timestamp,gpu,field,value\n"
+                with open(f, "a") as fh:
+                    fh.write(f"{head}{ts_f},{where['GPU2']},DCGM_FI_DEV_ROW_REMAP_FAILURE,1\n")
         if telemetry and h in nospare_hosts:
             ts_n = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 + 7300))
             (out / h).mkdir(exist_ok=True)
