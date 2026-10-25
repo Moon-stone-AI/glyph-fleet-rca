@@ -7,6 +7,7 @@
 #   sudo ./glyph-collect.sh                 # last 30 days of kernel log, redacted
 #   sudo ./glyph-collect.sh --days 90
 #   sudo ./glyph-collect.sh --diag 2        # ALSO run DCGM diagnostics (loads the GPUs: idle nodes only)
+#   sudo ./glyph-collect.sh --bmc ./exports # ALSO add vendor BMC exports from a folder (redacted too)
 #   sudo ./glyph-collect.sh --no-redact     # keep hostnames, IPs, MACs and serial numbers
 #
 # What it reads (each step is skipped if the tool is missing):
@@ -17,30 +18,35 @@
 #   DCGM GPU ids         dcgmi discovery -l                     -> dcgm-discovery.txt
 #   DCGM diagnostics     dcgmi diag -r N -j, only with --diag   -> dcgm-diag.json
 # Vendor BMC exports (iDRAC Lifecycle Log, Lenovo XCC event log, HPE IML) cannot be read from the
-# host without vendor tools: export them from the BMC web page and put the files in bmc/ before
-# sending (see bmc/README.txt inside the archive).
+# host without vendor tools: export them from the BMC web page into a folder and pass it with
+# --bmc FOLDER. The files are copied into bmc/ and redacted with everything else.
 #
-# Redaction (default ON): the hostname becomes node-<hash>, IPv4 and MAC addresses and serial
-# numbers are masked. GPU UUIDs are kept: they are how a GPU's history follows the card.
+# Redaction (default ON), applied to every text file in the archive, bmc/ included: the hostname
+# becomes node-<hash>; IPv4, IPv6 and MAC addresses are masked; serial numbers, board part numbers
+# and Dell service tags are masked ("Key: value", "Key=value" and <Key>value</Key> forms).
+# GPU UUIDs and PCIe addresses are kept: they are how a GPU's history follows the card.
 #
 # (c) 2026 Vitali de Mille. PolyForm Noncommercial 1.0.0. https://github.com/Moon-stone-AI/glyph-fleet-rca
 set -u
-VERSION="0.5.0"
+VERSION="0.5.1"
 DAYS=30
 DIAG=""
 REDACT=1
+BMC_DIR=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --days) DAYS="$2"; shift 2 ;;
     --diag) DIAG="$2"; shift 2 ;;
+    --bmc) BMC_DIR="${2:-}"; shift 2 ;;
     --no-redact) REDACT=0; shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 case "$DAYS" in ''|*[!0-9]*) echo "--days needs a number" >&2; exit 2 ;; esac
 case "$DIAG" in ''|1|2|3|4) ;; *) echo "--diag must be 1, 2, 3 or 4" >&2; exit 2 ;; esac
+if [ -n "$BMC_DIR" ] && [ ! -d "$BMC_DIR" ]; then echo "--bmc needs a folder: $BMC_DIR" >&2; exit 2; fi
 
 have() { command -v "$1" >/dev/null 2>&1; }
 log() { echo "[glyph-collect] $*" >&2; }
@@ -93,7 +99,7 @@ if have ipmitool; then
     rm -f "$OUT/sel.txt"; log "ipmitool present but the SEL could not be read (no /dev/ipmi0 or not root)"
   fi
 else
-  log "ipmitool not installed: export the BMC event log by hand into bmc/"
+  log "ipmitool not installed: export the BMC event log from the BMC page and pass it with --bmc FOLDER"
 fi
 
 # ---- GPU state
@@ -134,22 +140,46 @@ fi
 } > "$OUT/pci-sysfs.tsv"
 
 cat > "$OUT/bmc/README.txt" <<'EOF'
-Put vendor BMC event-log exports here before sending, as plain text or CSV:
+Vendor BMC event-log exports, as plain text, CSV or XML. Export them from the BMC page into a
+folder and run the collector with --bmc FOLDER, so that they are redacted before archiving.
+Files added here by hand after the archive was built are NOT redacted.
   Dell iDRAC:   Maintenance > Lifecycle Log > Export  (or: racadm lclog export)
   Lenovo XCC:   Events > Event Log > Export
   HPE iLO:      Information > Integrated Management Log > Save
 GlyphAI reads Dell message IDs, Lenovo FQX event IDs and HPE IML texts from these files.
 EOF
 
-# ---- redaction
-if [ "$REDACT" = 1 ]; then
-  for f in "$OUT"/*.txt "$OUT"/*.log "$OUT"/*.json; do
+# ---- vendor BMC exports given with --bmc (top-level regular files only; copied, never moved)
+if [ -n "$BMC_DIR" ]; then
+  n=0
+  for f in "$BMC_DIR"/*; do
     [ -f "$f" ] || continue
+    case "$(basename "$f")" in README.txt) continue ;; esac
+    cp -- "$f" "$OUT/bmc/" && n=$((n + 1))
+  done
+  log "bmc/: $n file(s) copied from $BMC_DIR"
+fi
+
+# ---- redaction: every text file in the archive, bmc/ included
+# IPv6: only full 8-group addresses, or forms with "::" and at least one hex group, bounded by
+# characters that cannot belong to an address. PCIe addresses (0000:1b:00.0) and clock times
+# (10:23:45) are left alone. The IPv6 pass runs twice so that adjacent addresses are caught.
+H='[0-9A-Fa-f]{1,4}'
+V6="(($H:){7}$H|$H(:$H){0,6}::($H(:$H){0,6})?|::$H(:$H){0,6})(:x\.x\.x\.x)?"
+P6='[^0-9A-Za-z_:.]'     # what may come before an address
+S6='[^0-9A-Za-z_:]'      # what may follow it (a scope like %ib0, a full stop, a space)
+KEYS='Serial Number|Serial No\.?|SerialNumber|Serial_Number|Serial|Board Part Number|Service Tag|ServiceTag|SVCTAG'
+if [ "$REDACT" = 1 ]; then
+  find "$OUT" -type f ! -name README.txt | while IFS= read -r f; do
+    grep -Iq . "$f" 2>/dev/null || continue          # skip empty and binary files
     sed -E -i \
       -e "s/${HOST_REAL//./\\.}/$NODE/g" -e "s/\\b${HOST_SHORT}\\b/$NODE/g" \
       -e 's/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/x.x.x.x/g' \
       -e 's/\b([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b/xx:xx:xx:xx:xx:xx/g' \
-      -e 's/((Serial Number|Board Part Number|Serial)[[:space:]]*:[[:space:]]*).*/\1REDACTED/I' \
+      -e "s/(^|$P6)$V6($S6|\$)/\1x:x:x:x\9/g" \
+      -e "s/(^|$P6)$V6($S6|\$)/\1x:x:x:x\9/g" \
+      -e "s/(($KEYS)[[:space:]]*[:=][[:space:]]*).*/\1REDACTED/I" \
+      -e "s/(<($KEYS)>)[^<]*(<)/\1REDACTED\3/Ig" \
       "$f"
   done
 fi
