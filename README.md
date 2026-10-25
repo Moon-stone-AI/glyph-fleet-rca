@@ -149,12 +149,13 @@ For a handful of servers, debugging and triage start from one script. `tools/gly
 ```bash
 sudo ./tools/glyph-collect.sh               # kernel log (30 days), ipmitool SEL, nvidia-smi -q, PCIe links from sysfs
 sudo ./tools/glyph-collect.sh --diag 2      # also DCGM diagnostics: loads the GPUs, idle and drained nodes only
+sudo ./tools/glyph-collect.sh --bmc ./exports  # also vendor BMC exports (iDRAC, XCC, iLO) from a folder, redacted too
 python -m glyphrca ingest glyph-collect-*.tar.gz --out fleet/
 python -m glyphrca analyze fleet/ --health-csv health.csv --buckets-csv queues.csv
 ```
 
-- **Redacted by default**: the hostname becomes `node-<hash>`, IPv4 and MAC addresses and serial numbers are masked. GPU UUIDs stay, because they carry a card's history. `--no-redact` keeps everything.
-- Vendor BMC logs (iDRAC Lifecycle Log, XCC event log, HPE IML) need an export from the BMC page into the archive's `bmc/` folder; they are read with the v0.3 vendor codebooks.
+- **Redacted by default**, in every text file of the archive including `bmc/`: the hostname becomes `node-<hash>`; IPv4, IPv6 and MAC addresses are masked; serial numbers, board part numbers and Dell service tags are masked in `Key: value`, `Key=value` and `<Key>value</Key>` form. GPU UUIDs and PCIe addresses stay, because they carry a card's history. `--no-redact` keeps everything.
+- Vendor BMC logs (iDRAC Lifecycle Log, XCC event log, HPE IML) need an export from the BMC page into a folder, passed with `--bmc FOLDER`: the files are copied (the originals are not touched) and redacted before archiving. Files added to `bmc/` by hand after the archive is built are not redacted. Serial numbers that sit in an unlabelled CSV column are not recognised; look before you send. They are read with the v0.3 vendor codebooks.
 - `nvidia-smi -q` adds what the card itself remembers: uncorrectable remapped rows, pending remaps, remap failure and banks low on spare rows. One incident is counted once: if the kernel log already holds Xid 63 or 64 for that GPU, the snapshot of the same fact is not added.
 - On one or a few servers you get per-node triage, the GPU health index, work queues and each node's timeline. Survivor search, firmware correlation and pattern mining need a fleet.
 - The DCGM diagnostics reader is **experimental**: it was built without a real customer sample yet. If it recognises nothing, it says so.
@@ -211,7 +212,7 @@ glyphrca/pcie.py         PCIe tree: golden shape, missing/degraded devices, swit
                          bus-loss witnesses across SEL, kernel and tree
 glyphrca/tier2.py        opaque tokens and private codebook
 glyphrca/ingest.py       glyph-collect archives -> fleet directory (v0.5)
-tools/glyph-collect.sh   read-only collector for one Linux GPU server (v0.5)
+tools/glyph-collect.sh   read-only collector for one Linux GPU server (v0.5.1: --bmc, IPv6 and service-tag redaction)
 glyphrca/report.py       pipeline, size accounting, text report
 glyphrca/synth.py        synthetic fleet generator (all scenarios above)
 tests/                   unit and end-to-end tests
